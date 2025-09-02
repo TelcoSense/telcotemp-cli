@@ -1,0 +1,27 @@
+[mysql]
+host =
+port =
+user =
+password =
+
+[influx_common]
+url =
+token =
+org = vut
+
+[influx_read]
+bucket = realtime_cbl
+measurements = 1s10, summit, summit_bt
+fields = Teplota, PrijimanaUroven
+tag_device = agent_host
+field_temperature = Teplota
+field_signal = PrijimanaUroven
+window = 10m
+range = -1h
+
+[influx_write]
+bucket = telcotemp_output
+measurement = telcorain
+tag_cml_id = cml_id
+tag_side = side
+field_temperature = temperature

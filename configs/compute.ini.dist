@@ -1,0 +1,14 @@
+[grid]
+x_points = 500
+y_points = 500
+mask_resolution_safe = true
+
+[interpolation]
+variogram_model = spherical
+nlags = 40
+regression_model = linear
+
+[location]
+lat = 49.8175
+lng = 15.4730
+tz = Europe/Prague

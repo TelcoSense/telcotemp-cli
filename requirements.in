@@ -1,0 +1,16 @@
+astral
+geopandas
+influxdb-client
+joblib
+matplotlib
+numpy>=1.26,<2.1
+pandas
+PyKrige
+pyproj
+pytz
+rasterio
+scikit-learn==1.6.1
+shapely
+SQLAlchemy==1.4.39
+tensorflow-intel==2.18.0
+mysqlclient
