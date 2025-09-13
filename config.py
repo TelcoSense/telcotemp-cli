@@ -6,9 +6,9 @@ import configparser
 class AppConfig:
     def __init__(self, config_dir="configs"):
         self.config_dir = config_dir
-        self.app = self._load("app.ini.dist")
-        self.database = self._load("database.ini.dist")
-        self.compute = self._load("compute.ini.dist")
+        self.app = self._load("app.ini")
+        self.database = self._load("database.ini")
+        self.compute = self._load("compute.ini")
 
     def _load(self, filename):
         cfg = configparser.ConfigParser()
@@ -53,9 +53,8 @@ class AppConfig:
     def get_ml(self):
         ml = self.app["ml"] if "ml" in self.app else {}
         return {
-            "linear_model_path": ml.get("linear_model_path", "Linear_model_final1.joblib"),
-            "lstm_path": ml.get("lstm_path", "neural/lstm.keras"),
-            "scaler_path": ml.get("scaler_path", "neural/scaler.joblib"),
+            "lstm_path": ml.get("lstm_path", "best_lstm_new.keras"),
+            "scaler_path": ml.get("scaler_path", "neural/scaler_new.joblib"),
         }
 
     # --- DATABASE / MYSQL ---
