@@ -8,7 +8,7 @@ fmt = %(asctime)s -%(funcName)s - %(levelname)s - %(message)s
 [paths]
 country_file = country_data/czech_republic.json
 dem_tif = country_data/elevation_data.tif
-images_dir = ./output_web
+images_dir = ./outputs_web
 
 [visualization]
 n_levels = 15
