@@ -9,13 +9,19 @@ from log import setup_logger
 
 config = AppConfig()
 log_config = config.get_logging_config()
-backend_logger = setup_logger('backend_logger', log_config.get("backend_log"), level=log_config.get("level"))
+backend_logger = setup_logger(
+    "backend_logger", log_config.get("backend_log"), level=log_config.get("level")
+)
 
 
 def data_processing_loop():
-    db_ops, geo_proc, czech_rep, elevation_data, transform_matrix, crs = initialize_app(config)
+    db_ops, geo_proc, czech_rep, elevation_data, transform_matrix, crs = initialize_app(
+        config
+    )
     while True:
-        process_data_round(config, db_ops, geo_proc, czech_rep, elevation_data, transform_matrix, crs)
+        process_data_round(
+            config, db_ops, geo_proc, czech_rep, elevation_data, transform_matrix, crs
+        )
         wait_for_next_hour()
 
 

@@ -1,5 +1,5 @@
 [logging]
-level = INFO
+level = DEBUG
 backend_log = app.log
 max_bytes = 10485760
 backups = 1

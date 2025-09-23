@@ -1,13 +1,13 @@
 [mysql]
-host =
-port =
-user =
-password =
+host=192.168.64.168
+port=3306
+user=
+password=
 
 [influx_common]
-url =
-token =
-org = vut
+url=
+token=
+org=vut
 
 [influx_read]
 bucket = realtime_cbl

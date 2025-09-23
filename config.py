@@ -26,7 +26,11 @@ class AppConfig:
             "backend_log": lg.get("backend_log", "app.log"),
             "max_bytes": lg.getint("max_bytes", 10 * 1024 * 1024),
             "backups": lg.getint("backups", 1),
-            "fmt": lg.get("fmt", raw=True, fallback="%(asctime)s -%(funcName)s - %(levelname)s - %(message)s"),
+            "fmt": lg.get(
+                "fmt",
+                raw=True,
+                fallback="%(asctime)s -%(funcName)s - %(levelname)s - %(message)s",
+            ),
         }
 
     def get_paths(self):
@@ -76,34 +80,49 @@ class AppConfig:
         if mode not in ("read", "write"):
             raise ValueError("mode musí být 'read' nebo 'write'")
 
-        common = self.database["influx_common"] if "influx_common" in self.database else {}
+        common = (
+            self.database["influx_common"] if "influx_common" in self.database else {}
+        )
         section = self.database["influx_read" if mode == "read" else "influx_write"]
 
         cfg = {
             "org": common.get("org"),
             "url": common.get("url"),
             "token": common.get("token"),
-
         }
         if mode == "read":
-            cfg.update({
-                "bucket": section.get("bucket", "realtime_cbl"),
-                "measurements": [s.strip() for s in section.get("measurements", "").split(",") if s.strip()],
-                "fields": [s.strip() for s in section.get("fields", "").split(",") if s.strip()],
-                "tag_device": section.get("tag_device", "agent_host"),
-                "field_temperature": section.get("field_temperature", "Teplota"),
-                "field_signal": section.get("field_signal", "PrijimanaUroven"),
-                "window": section.get("window", "1m"),
-                "range": section.get("range", "-1m"),
-            })
+            cfg.update(
+                {
+                    "bucket": section.get("bucket", "realtime_cbl"),
+                    "measurements": [
+                        s.strip()
+                        for s in section.get("measurements", "").split(",")
+                        if s.strip()
+                    ],
+                    "fields": [
+                        s.strip()
+                        for s in section.get("fields", "").split(",")
+                        if s.strip()
+                    ],
+                    "tag_device": section.get("tag_device", "agent_host"),
+                    "field_temperature": section.get("field_temperature", "Teplota"),
+                    "field_signal": section.get("field_signal", "PrijimanaUroven"),
+                    "window": section.get("window", "1m"),
+                    "range": section.get("range", "-1m"),
+                }
+            )
         else:
-            cfg.update({
-                "bucket": section.get("bucket", "telcorain_output"),
-                "measurement": section.get("measurement", "telcorain"),
-                "tag_cml_id": section.get("tag_cml_id", "cml_id"),
-                "tag_side": section.get("tag_side", "side"),
-                "field_temperature": section.get("field_temperature", "temperature"),
-            })
+            cfg.update(
+                {
+                    "bucket": section.get("bucket", "telcorain_output"),
+                    "measurement": section.get("measurement", "telcorain"),
+                    "tag_cml_id": section.get("tag_cml_id", "cml_id"),
+                    "tag_side": section.get("tag_side", "side"),
+                    "field_temperature": section.get(
+                        "field_temperature", "temperature"
+                    ),
+                }
+            )
         return cfg
 
     # --- COMPUTE ---
@@ -130,4 +149,3 @@ class AppConfig:
             "lng": float(loc.get("lng", "15.4730")),
             "tz": loc.get("tz", "Europe/Prague"),
         }
-
