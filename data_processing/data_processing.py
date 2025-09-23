@@ -82,7 +82,7 @@ def process_data_round(config, db_ops, geo_proc, czech_rep, elevation_data, tran
         df = prepare_data(df, elevation_data, transform_matrix, crs, latitudes, longitudes, azimuths, links,
                           technologies,
                           sides)
-        unique_links_list, image_name, image_time = collect_data_summary(df)
+        image_name, image_time = collect_data_summary(df)
 
         ml_cfg = config.get_ml()
         df = temperature_predict(df, scaler_path=ml_cfg["scaler_path"], lstm_model_path=ml_cfg["lstm_path"])
