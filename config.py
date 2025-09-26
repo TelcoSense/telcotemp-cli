@@ -38,8 +38,8 @@ class AppConfig:
         return {
             "country_file": p.get("country_file"),
             "dem_tif": p.get("dem_tif"),
-            "images_dir": p.get("images_dir", "images"),
-            "saved_grids_dir": p.get("saved_grids_dir", "saved_grids"),
+            "images_dir": p.get("images_dir", "outputs_web"),
+            "color_scale_dir": p.get("color_scale_dir", "outputs_raw"),
         }
 
     def get_visualization(self):
@@ -52,6 +52,7 @@ class AppConfig:
         return {
             "n_levels": int(vis.get("n_levels", "15")),
             "colormap": colormap,
+            "median_offset": int(vis.get("median_offset", "0"))
         }
 
     def get_ml(self):
