@@ -3,6 +3,7 @@ from data_processing.ml_modeling import temperature_predict
 from interpolation.interpolation import spatial_interpolation
 from database_operations.influx_manager import get_data, write_predictions
 from spatial_processing.visualization import map_plotting
+from data_processing.saving_utils import save_color_scale
 import pandas as pd
 import datetime
 import gc
@@ -99,7 +100,8 @@ def process_data_round(config, db_ops, geo_proc, czech_rep, elevation_data, tran
         )
 
         write_predictions(df, config)
-        map_plotting(grid_x, grid_y, grid_z, czech_rep, image_name, config)
+        color_scale_info= map_plotting(grid_x, grid_y, grid_z, czech_rep, image_name, config)
+        save_color_scale(color_scale_info,image_name, config)
     except Exception as e:
         backend_logger.error(f"Error during data processing round: {e}\n{traceback.format_exc()}")
 

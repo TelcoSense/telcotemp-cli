@@ -11,6 +11,7 @@ def map_plotting(grid_x, grid_y, grid_z, czech_rep, image_name, config, show_bou
     paths = config.get_paths()
     n_levels = vis["n_levels"]
     colormap = vis["colormap"]
+    median_offset = vis["median_offset"]
 
     if not colormap:
         colormap = [
@@ -24,9 +25,9 @@ def map_plotting(grid_x, grid_y, grid_z, czech_rep, image_name, config, show_bou
     try:
         cmap = mcolors.LinearSegmentedColormap.from_list("custom_colormap", colormap, N=n_levels)
 
-        median_value = np.nanmedian(grid_z) - 2
-        vmin = int(median_value) - 7
-        vmax = int(median_value) + 7
+        temperature_median = np.nanmedian(grid_z) - median_offset
+        vmin = int(temperature_median) - 7
+        vmax = int(temperature_median) + 7
 
         fig, ax = plt.subplots(figsize=(8, 4), frameon=False)
         c = ax.pcolormesh(grid_x, grid_y, grid_z, cmap=cmap, shading="auto", edgecolor="none", vmin=vmin, vmax=vmax)
@@ -41,6 +42,14 @@ def map_plotting(grid_x, grid_y, grid_z, czech_rep, image_name, config, show_bou
         plt.savefig(save_path, format="png", dpi=150, transparent=True, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
         backend_logger.info("Plot saved: %s", save_path)
+
+        return {
+            "median_value": temperature_median,
+            "vmin": vmin,
+            "vmax": vmax,
+            "n_levels": n_levels,
+            "colors": [{"level": level, "color": color} for level, color in colormap]
+        }
     except Exception as e:
         backend_logger.exception("Exception in map_plotting: %s", e)
         raise
