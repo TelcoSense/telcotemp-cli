@@ -5,8 +5,9 @@ import pandas as pd
 from astral.sun import sun
 from astral import LocationInfo
 import pytz
+from pytz import UTC
 
-backend_logger = logging.getLogger('backend_logger')
+backend_logger = logging.getLogger("backend_logger")
 
 
 def is_daylight(ts_utc, lat, lng, local_tz_str):
@@ -24,7 +25,7 @@ def is_daylight(ts_utc, lat, lng, local_tz_str):
     return 1 if sunrise_utc <= ts_utc <= sunset_utc else 0
 
 
-def get_data(config):
+def get_data(config, start_time, end_time):
     read_cfg = config.get_influx_config("read")
     loc = config.get_location()
 
@@ -37,16 +38,20 @@ def get_data(config):
     meas_filter = " or ".join([f'r["_measurement"] == "{m}"' for m in measurements])
     fields_filter = " or ".join([f'r["_field"] == "{f}"' for f in fields])
 
+    # Ensure start_time and end_time are in ISO 8601 format with UTC timezone
+    start_time_iso = start_time.astimezone(UTC).isoformat()
+    end_time_iso = end_time.astimezone(UTC).isoformat()
+
     try:
         with InfluxDBClient(url=read_cfg["url"], token=read_cfg["token"]) as client:
-            query = f'''
+            query = f"""
                 from(bucket: "{read_cfg["bucket"]}")
-                  |> range(start: {read_cfg["range"]})
+                  |> range(start: {start_time_iso}, stop: {end_time_iso})
                   |> filter(fn: (r) => {meas_filter})
                   |> filter(fn: (r) => {fields_filter})
                   |> aggregateWindow(every: {read_cfg["window"]}, fn: mean)
                   |> group(columns: ["_measurement", "_field", "{device_tag}"])
-                '''
+            """
             result = client.query_api().query(org=read_cfg["org"], query=query)
 
             data = [
@@ -56,12 +61,15 @@ def get_data(config):
                     "Value": rec.get_value(),
                     "Device": rec.values[device_tag],
                 }
-                for table in result for rec in table.records
+                for table in result
+                for rec in table.records
             ]
 
             df = pd.DataFrame(data)
             if df.empty:
-                backend_logger.info("Influx vrátil prázdná data.")
+                backend_logger.info(
+                    "Influx returned empty data for the given time range."
+                )
                 return df
 
             df_pivot = df.pivot_table(
@@ -69,7 +77,7 @@ def get_data(config):
             ).reset_index()
 
             df_pivot["Time"] = pd.to_datetime(df_pivot["Time"], utc=True)
-            df_pivot["Unix"] = df_pivot["Time"].astype("int64") // 10 ** 9
+            df_pivot["Unix"] = df_pivot["Time"].astype("int64") // 10**9
             if field_temp in df_pivot.columns:
                 df_pivot.rename(columns={field_temp: "Temperature_MW"}, inplace=True)
             if field_sig in df_pivot.columns:
@@ -79,10 +87,11 @@ def get_data(config):
                 lambda t: is_daylight(t, loc["lat"], loc["lng"], loc["tz"])
             )
             df_final = df_pivot.rename(columns={"Device": "IP"})
+            print(df_final)
             return df_final
 
     except Exception as e:
-        backend_logger.warning(f"Influx get_data selhal: {e}")
+        backend_logger.warning(f"Influx get_data failed: {e}")
 
     return pd.DataFrame()
 
@@ -97,7 +106,9 @@ def write_predictions(df_pred, config):
         return False
 
     try:
-        with InfluxDBClient(url=write_cfg["url"], token=write_cfg["token"], org=write_cfg["org"]) as client:
+        with InfluxDBClient(
+            url=write_cfg["url"], token=write_cfg["token"], org=write_cfg["org"]
+        ) as client:
             write_api = client.write_api(write_options=SYNCHRONOUS)
             points = []
             for _, row in df_pred.iterrows():
@@ -116,7 +127,9 @@ def write_predictions(df_pred, config):
                     )
                     points.append(p)
                 except Exception as row_err:
-                    backend_logger.warning(f"Přeskakuji řádek kvůli chybě konverze: {row_err}")
+                    backend_logger.warning(
+                        f"Přeskakuji řádek kvůli chybě konverze: {row_err}"
+                    )
 
             if points:
                 write_api.write(bucket=write_cfg["bucket"], record=points)

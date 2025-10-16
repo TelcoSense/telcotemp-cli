@@ -73,66 +73,99 @@ def prepare_data(
 
 
 def process_data_round(
-    config, db_ops, geo_proc, czech_rep, elevation_data, transform_matrix, crs
+    config,
+    db_ops,
+    geo_proc,
+    czech_rep,
+    elevation_data,
+    transform_matrix,
+    crs,
+    start_time=None,
+    end_time=None,
+    link_ids=None,
 ):
-    global first_run
-    start_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    backend_logger.info(f"Calculation started on {start_datetime}")
+    """
+    Processes data for a given time range. If no range is provided, processes the current hour.
+    """
+    start_time = start_time or datetime.datetime.now().replace(
+        minute=0, second=0, microsecond=0
+    )
+    end_time = end_time or start_time + datetime.timedelta(hours=1)
 
-    try:
+    current_time = start_time
+    while current_time < end_time:
+        try:
+            backend_logger.info(f"Processing data for hour: {current_time}")
+            df = get_data(
+                config, current_time, current_time + datetime.timedelta(hours=1)
+            )
+            latitudes, longitudes, azimuths, links, technologies, sides = (
+                db_ops.get_metadata(df)
+            )
+            backend_logger.info(f"Link IDs passed to process_data_round: {link_ids}")
 
-        df = get_data(config)
-        latitudes, longitudes, azimuths, links, technologies, sides = (
-            db_ops.get_metadata(df)
-        )
-        df = prepare_data(
-            df,
-            elevation_data,
-            transform_matrix,
-            crs,
-            latitudes,
-            longitudes,
-            azimuths,
-            links,
-            technologies,
-            sides,
-        )
-        image_name, image_time = collect_data_summary(df)
+            df = prepare_data(
+                df,
+                elevation_data,
+                transform_matrix,
+                crs,
+                latitudes,
+                longitudes,
+                azimuths,
+                links,
+                technologies,
+                sides,
+            )
 
-        ml_cfg = config.get_ml()
-        df = temperature_predict(
-            df, scaler_path=ml_cfg["scaler_path"], lstm_model_path=ml_cfg["lstm_path"]
-        )
+            if link_ids is not None:
+                mask = df["Link_ID"].isin(link_ids)
+                df = df[mask].reset_index(drop=True)
+                print(df)
+                backend_logger.info(
+                    f"Filtered dataset to {len(df)} rows based on Link_IDs."
+                )
+                if df.empty:
+                    backend_logger.warning(
+                        "No data available after filtering by Link_IDs."
+                    )
+                    current_time += datetime.timedelta(hours=1)
+                    continue
 
-        itp = config.get_interpolation_config()
-        grid = config.get_grid_config()
-        grid_x, grid_y, grid_z = spatial_interpolation(
-            df,
-            czech_rep,
-            geo_proc,
-            elevation_data,
-            transform_matrix,
-            crs,
-            variogram_model=itp["variogram_model"],
-            nlags=itp["nlags"],
-            regression_model_type=itp["regression_model"],
-            grid_x_points=grid["x_points"],
-            grid_y_points=grid["y_points"],
-        )
+            image_name, image_time = collect_data_summary(df)
 
-        write_predictions(df, config)
-        color_scale_info = map_plotting(
-            grid_x, grid_y, grid_z, czech_rep, image_name, config
-        )
-    except Exception as e:
-        backend_logger.error(
-            f"Error during data processing round: {e}\n{traceback.format_exc()}"
-        )
+            ml_cfg = config.get_ml()
+            df = temperature_predict(
+                df,
+                scaler_path=ml_cfg["scaler_path"],
+                lstm_model_path=ml_cfg["lstm_path"],
+            )
 
-    finally:
-        if "df" in locals():
-            del df
-        gc.collect()
+            itp = config.get_interpolation_config()
+            grid = config.get_grid_config()
+            grid_x, grid_y, grid_z = spatial_interpolation(
+                df,
+                czech_rep,
+                geo_proc,
+                elevation_data,
+                transform_matrix,
+                crs,
+                variogram_model=itp["variogram_model"],
+                nlags=itp["nlags"],
+                regression_model_type=itp["regression_model"],
+                grid_x_points=grid["x_points"],
+                grid_y_points=grid["y_points"],
+            )
+
+            # write_predictions(df, config)
+            map_plotting(grid_x, grid_y, grid_z, czech_rep, image_name, config)
+
+        except Exception as e:
+            backend_logger.error(
+                f"Error during data processing for hour {current_time}: {e}\n{traceback.format_exc()}"
+            )
+        finally:
+            current_time += datetime.timedelta(hours=1)
+            gc.collect()
     end_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     backend_logger.info(
         f"Calculation ended on {end_datetime}. Waiting for another round.."
