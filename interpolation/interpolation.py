@@ -5,95 +5,187 @@ from pykrige.rk import RegressionKriging
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.svm import SVR
-import logging
 
-backend_logger = logging.getLogger('backend_logger')
 
-def spatial_interpolation(
-    df,
-    rep,
-    geo_proc,
-    elevation_data,
-    transform_matrix,
-    crs,
-    variogram_model='spherical',
-    nlags=40,
-    regression_model_type='linear',
-    grid_x_points=500,
-    grid_y_points=500
-):
-    backend_logger.info("spatial_interpolation start (model=%s, variogram=%s, nlags=%s)",
-                        regression_model_type, variogram_model, nlags)
-    try:
-        rep_crs = getattr(rep, "crs", None) or "EPSG:4326"
+class SpatialInterpolator:
+    def __init__(self, config, logger):
+        """
+        Initializes the SpatialInterpolator with configuration parameters.
 
-        bounds = rep.total_bounds
-        grid_x, grid_y = np.mgrid[
-            bounds[0]:bounds[2]:complex(grid_x_points),
-            bounds[1]:bounds[3]:complex(grid_y_points)
-        ]
-        mask = geo_proc.create_mask(rep, grid_x, grid_y)
+        :param config: AppConfig instance for accessing interpolation configuration.
+        :param logger: Logger instance for logging messages.
+        """
+        self.logger = logger
+        self._load_config(config)
 
-        valid_points = (~df['Longitude'].isna()) & (~df['Latitude'].isna()) & (~df['Predicted_Temperature'].isna())
-        if valid_points.sum() < 3:
-            raise ValueError("Málo platných měření pro kriging (potřeba alespoň 3).")
+    def _load_config(self, config):
+        """
+        Loads the interpolation configuration from the provided config object.
 
-        lon = df.loc[valid_points, 'Longitude'].values
-        lat = df.loc[valid_points, 'Latitude'].values
-        temp = df.loc[valid_points, 'Predicted_Temperature'].values
+        :param config: AppConfig instance for accessing interpolation configuration.
+        """
+        itp = config.get_interpolation_config()
+        grid = config.get_grid_config()
+        self.variogram_model = itp["variogram_model"]
+        self.nlags = itp["nlags"]
+        self.regression_model_type = itp["regression_model"]
+        self.grid_x_points = grid["x_points"]
+        self.grid_y_points = grid["y_points"]
 
-        to_raster_from_wgs = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
-        x_pts_raster, y_pts_raster = to_raster_from_wgs.transform(lon, lat)
+    def _get_regression_model(self):
+        """
+        Returns the regression model based on the specified type.
 
-        to_raster_from_rep = Transformer.from_crs(rep_crs, crs, always_xy=True)
-        grid_x_flat_rep = grid_x.ravel()
-        grid_y_flat_rep = grid_y.ravel()
-        grid_x_raster, grid_y_raster = to_raster_from_rep.transform(grid_x_flat_rep, grid_y_flat_rep)
+        :return: An instance of the selected regression model.
+        """
+        if self.regression_model_type == "linear":
+            return LinearRegression()
+        elif self.regression_model_type == "random_forest":
+            return RandomForestRegressor(n_estimators=100, random_state=42)
+        elif self.regression_model_type == "gradient_boosting":
+            return GradientBoostingRegressor(n_estimators=100, random_state=42)
+        elif self.regression_model_type == "svr":
+            return SVR(kernel="rbf", C=1.0, epsilon=0.1)
+        else:
+            raise ValueError(
+                f"Unknown regression model type: {self.regression_model_type}"
+            )
+
+    def _prepare_training_data(self, df, elevation_data, transform_matrix, crs):
+        """
+        Prepares training data for regression kriging.
+
+        :param df: DataFrame containing the input data.
+        :param elevation_data: 2D array of elevation data.
+        :param transform_matrix: Affine transformation matrix for the raster.
+        :param crs: Coordinate reference system of the raster.
+        :return: Tuple of elevation data, coordinates, temperature values, and mean elevation.
+        """
+        lon = df["Longitude"].values
+        lat = df["Latitude"].values
+        temp = df["Predicted_Temperature"].values
+
+        to_raster = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+        x_pts_raster, y_pts_raster = to_raster.transform(lon, lat)
 
         rows, cols = rowcol(transform_matrix, x_pts_raster, y_pts_raster)
         rows = np.clip(np.floor(rows).astype(int), 0, elevation_data.shape[0] - 1)
         cols = np.clip(np.floor(cols).astype(int), 0, elevation_data.shape[1] - 1)
         valid_elev = elevation_data[rows, cols]
-        if np.isnan(valid_elev).any():
-            mean_elev = np.nanmean(valid_elev)
-            valid_elev = np.nan_to_num(valid_elev, nan=(0.0 if np.isnan(mean_elev) else mean_elev))
 
-        if regression_model_type == 'linear':
-            regression_model = LinearRegression()
-        elif regression_model_type == 'random_forest':
-            regression_model = RandomForestRegressor(n_estimators=100, random_state=42)
-        elif regression_model_type == 'gradient_boosting':
-            regression_model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, random_state=42)
-        elif regression_model_type == 'svr':
-            regression_model = SVR(kernel='rbf', C=1.0, epsilon=0.1)
-        else:
-            raise ValueError(f"Unknown regression model type: {regression_model_type}")
+        mean_elev = np.nanmean(valid_elev)
+        fallback = 0.0 if np.isnan(mean_elev) else mean_elev
+        valid_elev = np.nan_to_num(valid_elev, nan=fallback)
 
-        X_train = valid_elev.reshape(-1, 1)
-        coords_train = np.c_[x_pts_raster, y_pts_raster]
-        rk = RegressionKriging(
-            regression_model=regression_model,
-            variogram_model=variogram_model,
-            n_closest_points=nlags
+        return (
+            valid_elev.reshape(-1, 1),
+            np.c_[x_pts_raster, y_pts_raster],
+            temp,
+            fallback,
         )
-        rk.fit(X_train, coords_train, temp)
 
-        grid_rows, grid_cols = rowcol(transform_matrix, grid_x_raster, grid_y_raster)
-        grid_rows = np.clip(np.floor(grid_rows).astype(int), 0, elevation_data.shape[0] - 1)
-        grid_cols = np.clip(np.floor(grid_cols).astype(int), 0, elevation_data.shape[1] - 1)
-        grid_elev = elevation_data[grid_rows, grid_cols]
+    def _prepare_prediction_grid(
+        self, grid_x, grid_y, elevation_data, transform_matrix, crs, rep_crs, fallback
+    ):
+        """
+        Prepares the prediction grid for regression kriging.
 
-        if np.isnan(grid_elev).any():
-            mean_elev = np.nanmean(valid_elev)
-            grid_elev = np.nan_to_num(grid_elev, nan=(0.0 if np.isnan(mean_elev) else mean_elev))
+        :param grid_x: X-coordinates of the grid.
+        :param grid_y: Y-coordinates of the grid.
+        :param elevation_data: 2D array of elevation data.
+        :param transform_matrix: Affine transformation matrix for the raster.
+        :param crs: Coordinate reference system of the raster.
+        :param rep_crs: Coordinate reference system of the grid.
+        :param fallback: Mean elevation to fill missing data in the grid.
+        :return: Tuple of elevation data and coordinates for the prediction grid.
+        """
+        to_raster = Transformer.from_crs(rep_crs, crs, always_xy=True)
+        grid_x_flat = grid_x.ravel()
+        grid_y_flat = grid_y.ravel()
+        grid_x_raster, grid_y_raster = to_raster.transform(grid_x_flat, grid_y_flat)
 
-        X_pred = grid_elev.reshape(-1, 1)
-        coords_pred = np.c_[grid_x_raster, grid_y_raster]
-        grid_predicted_temp = rk.predict(X_pred, coords_pred).reshape(grid_x.shape)
+        rows, cols = rowcol(transform_matrix, grid_x_raster, grid_y_raster)
+        rows = np.clip(np.floor(rows).astype(int), 0, elevation_data.shape[0] - 1)
+        cols = np.clip(np.floor(cols).astype(int), 0, elevation_data.shape[1] - 1)
+        grid_elev = elevation_data[rows, cols]
 
-        grid_predicted_temp = np.where(mask.reshape(grid_x.shape), grid_predicted_temp, np.nan)
-        return grid_x, grid_y, grid_predicted_temp
+        grid_elev = np.nan_to_num(grid_elev, nan=fallback)
 
-    except Exception as e:
-        backend_logger.exception("Exception in spatial_interpolation: %s", e)
-        raise
+        return grid_elev.reshape(-1, 1), np.c_[grid_x_raster, grid_y_raster]
+
+    def interpolate(
+        self,
+        df,
+        rep,
+        geo_proc,
+        elevation_data,
+        transform_matrix,
+        crs,
+    ):
+        """
+        Performs spatial interpolation using regression kriging.
+
+        :param df: DataFrame containing the input data.
+        :param rep: Geodataframe representing the region of interest.
+        :param geo_proc: Instance of GeographicalProcessing for mask creation.
+        :param elevation_data: 2D array of elevation data.
+        :param transform_matrix: Affine transformation matrix for the raster.
+        :param crs: Coordinate reference system of the raster.
+        :return: Tuple of grid X-coordinates, grid Y-coordinates, and predicted temperature grid.
+        """
+        self.logger.info(
+            "spatial_interpolation start (model=%s, variogram=%s, nlags=%s)",
+            self.regression_model_type,
+            self.variogram_model,
+            self.nlags,
+        )
+        try:
+            rep_crs = getattr(rep, "crs", None) or "EPSG:4326"
+            bounds = rep.total_bounds
+            grid_x, grid_y = np.mgrid[
+                bounds[0] : bounds[2] : complex(self.grid_x_points),
+                bounds[1] : bounds[3] : complex(self.grid_y_points),
+            ]
+            mask = geo_proc.create_mask(rep, grid_x, grid_y)
+
+            valid_points = (
+                df["Longitude"].notna()
+                & df["Latitude"].notna()
+                & df["Predicted_Temperature"].notna()
+            )
+            if valid_points.sum() < 3:
+                raise ValueError(
+                    "Not enough valid measurements for kriging (at least 3 required)."
+                )
+
+            X_train, coords_train, temp, mean_elev = self._prepare_training_data(
+                df.loc[valid_points], elevation_data, transform_matrix, crs
+            )
+
+            regression_model = self._get_regression_model()
+            rk = RegressionKriging(
+                regression_model=regression_model,
+                variogram_model=self.variogram_model,
+                n_closest_points=self.nlags,
+            )
+            rk.fit(X_train, coords_train, temp)
+
+            X_pred, coords_pred = self._prepare_prediction_grid(
+                grid_x,
+                grid_y,
+                elevation_data,
+                transform_matrix,
+                crs,
+                rep_crs,
+                mean_elev,
+            )
+            grid_predicted_temp = rk.predict(X_pred, coords_pred).reshape(grid_x.shape)
+
+            grid_predicted_temp = np.where(
+                mask.reshape(grid_x.shape), grid_predicted_temp, np.nan
+            )
+            return grid_x, grid_y, grid_predicted_temp
+
+        except Exception as e:
+            self.logger.exception("Exception in spatial_interpolation: %s", e)
+            raise

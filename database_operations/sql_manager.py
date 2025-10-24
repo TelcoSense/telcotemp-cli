@@ -1,12 +1,11 @@
-import logging
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text, bindparam
 import time
-backend_logger = logging.getLogger('backend_logger')
 
 
 class DatabaseOperations:
-    def __init__(self, engine):
+    def __init__(self, engine, logger):
+        self.logger = logger
         self.engine = engine
         self.Session = sessionmaker(bind=self.engine)
         self._ip_meta_cache = {}
@@ -14,23 +13,38 @@ class DatabaseOperations:
     def get_metadata(self, df):
         t0 = time.perf_counter()
 
-        sites, azimuths, latitudes, longitudes, links, technologies, sides = [], [], [], [], [], [], []
+        sites, azimuths, latitudes, longitudes, links, technologies, sides = (
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
         to_drop = []
         devices = 0
 
         ips_series = df["IP"].astype(str).str.strip()
         unique_ips = sorted({ip for ip in ips_series if ip})
 
-        backend_logger.debug("get_metadata: %d řádků, %d unikátních IP.", len(df), len(unique_ips))
+        self.logger.debug(
+            "get_metadata: %d řádků, %d unikátních IP.", len(df), len(unique_ips)
+        )
 
-        cached = {ip: self._ip_meta_cache[ip] for ip in unique_ips if ip in self._ip_meta_cache}
+        cached = {
+            ip: self._ip_meta_cache[ip]
+            for ip in unique_ips
+            if ip in self._ip_meta_cache
+        }
         missing = [ip for ip in unique_ips if ip not in cached]
 
         fetched = {}
         if missing:
             try:
                 with self.Session() as session:
-                    stmt = text("""
+                    stmt = text(
+                        """
                         SELECT
                             l.ID            AS link_id,
                             l.technology    AS technology,
@@ -48,7 +62,8 @@ class DatabaseOperations:
                         ) x ON x.ID = l.ID
                         JOIN cml_metadata.sites s ON s.id = x.site_id
                         WHERE x.ip IN :ips
-                    """).bindparams(bindparam("ips", expanding=True))
+                    """
+                    ).bindparams(bindparam("ips", expanding=True))
 
                     result = session.execute(stmt, {"ips": missing}).all()
 
@@ -67,19 +82,19 @@ class DatabaseOperations:
                         fetched[rec["ip"]] = rec
                         self._ip_meta_cache[rec["ip"]] = rec
             except Exception as e:
-                backend_logger.error(f"Error during bulk metadata fetch: {e}")
+                self.logger.error(f"Error during bulk metadata fetch: {e}")
 
         lookup = {**cached, **fetched}
 
         for idx, ip in enumerate(ips_series):
             if not ip:
-                backend_logger.warning("No link result found for IP: <empty>")
+                self.logger.warning("No link result found for IP: <empty>")
                 to_drop.append(idx)
                 continue
 
             meta = lookup.get(ip)
             if meta is None:
-                backend_logger.debug(f"No link result found for IP: {ip}")
+                self.logger.debug(f"No link result found for IP: {ip}")
                 to_drop.append(idx)
                 continue
 
@@ -96,11 +111,12 @@ class DatabaseOperations:
             df.drop(index=to_drop, inplace=True)
             df.reset_index(drop=True, inplace=True)
 
-        backend_logger.info(f"Completed get_metadata method for {devices} devices.")
-        backend_logger.debug(
+        self.logger.info(f"Completed get_metadata method for {devices} devices.")
+        self.logger.debug(
             "get_metadata: cache_hit=%d, fetched=%d, elapsed=%.3fs",
-            len(cached), len(fetched), time.perf_counter() - t0
+            len(cached),
+            len(fetched),
+            time.perf_counter() - t0,
         )
 
         return latitudes, longitudes, azimuths, links, technologies, sides
-

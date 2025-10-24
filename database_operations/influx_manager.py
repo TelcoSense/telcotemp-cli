@@ -1,147 +1,154 @@
-import logging
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 import pandas as pd
-from astral.sun import sun
-from astral import LocationInfo
-import pytz
-from pytz import UTC
-
-backend_logger = logging.getLogger("backend_logger")
 
 
-def is_daylight(ts_utc, lat, lng, local_tz_str):
-    if ts_utc.tzinfo is None or ts_utc.tzinfo.utcoffset(ts_utc) is None:
-        raise ValueError("ts_utc must be tz-aware in UTC")
+class InfluxDBHandler:
+    def __init__(self, config, logger):
+        """
+        Initializes the InfluxDBHandler with configuration and logger.
 
-    local_tz = pytz.timezone(local_tz_str)
-    local_date = ts_utc.astimezone(local_tz).date()
-    loc = LocationInfo(timezone=local_tz_str, latitude=lat, longitude=lng)
+        :param config: AppConfig instance for accessing InfluxDB configuration.
+        :param logger: Logger instance for logging messages.
+        """
+        self.config = config
+        self.logger = logger
 
-    s = sun(loc.observer, date=local_date, tzinfo=local_tz)
-    sunrise_utc = s["sunrise"].astimezone(pytz.UTC)
-    sunset_utc = s["sunset"].astimezone(pytz.UTC)
+        # Load common InfluxDB configuration
+        influx_common = self.config.get_influx_config("read")
+        self.url = influx_common["url"]
+        self.token = influx_common["token"]
+        self.org = influx_common["org"]
 
-    return 1 if sunrise_utc <= ts_utc <= sunset_utc else 0
+        if not self.url or not self.token or not self.org:
+            raise ValueError(
+                "InfluxDB configuration is incomplete. Ensure 'url', 'token', and 'org' are set."
+            )
 
+    def _build_query(self, start_time, end_time, read_cfg):
+        """
+        Builds the Flux query for fetching data from InfluxDB.
 
-def get_data(config, start_time, end_time):
-    read_cfg = config.get_influx_config("read")
-    loc = config.get_location()
+        :param start_time: Start time for the query.
+        :param end_time: End time for the query.
+        :param read_cfg: Configuration for reading data.
+        :return: Flux query string.
+        """
+        start_time_iso = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_time_iso = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    fields = read_cfg["fields"]
-    field_temp = read_cfg["field_temperature"]
-    field_sig = read_cfg["field_signal"]
-    device_tag = read_cfg["tag_device"]
-    measurements = read_cfg["measurements"]
-
-    meas_filter = " or ".join([f'r["_measurement"] == "{m}"' for m in measurements])
-    fields_filter = " or ".join([f'r["_field"] == "{f}"' for f in fields])
-
-    # Ensure start_time and end_time are in ISO 8601 format with UTC timezone
-    start_time_iso = start_time.astimezone(UTC).isoformat()
-    end_time_iso = end_time.astimezone(UTC).isoformat()
-
-    try:
-        with InfluxDBClient(url=read_cfg["url"], token=read_cfg["token"]) as client:
-            query = f"""
+        measurements = " or ".join(
+            [f'r["_measurement"] == "{m}"' for m in read_cfg["measurements"]]
+        )
+        fields = " or ".join([f'r["_field"] == "{f}"' for f in read_cfg["fields"]])
+        return f"""
                 from(bucket: "{read_cfg["bucket"]}")
                   |> range(start: {start_time_iso}, stop: {end_time_iso})
-                  |> filter(fn: (r) => {meas_filter})
-                  |> filter(fn: (r) => {fields_filter})
+                  |> filter(fn: (r) => {measurements})
+                  |> filter(fn: (r) => {fields})
                   |> aggregateWindow(every: {read_cfg["window"]}, fn: mean)
-                  |> group(columns: ["_measurement", "_field", "{device_tag}"])
+                  |> group(columns: ["_measurement", "_field", "{read_cfg["tag_device"]}"])
             """
-            result = client.query_api().query(org=read_cfg["org"], query=query)
 
-            data = [
-                {
-                    "Time": rec.get_time(),
-                    "Measurement": rec.values["_field"],
-                    "Value": rec.get_value(),
-                    "Device": rec.values[device_tag],
-                }
-                for table in result
-                for rec in table.records
-            ]
+    def fetch_data(self, start_time, end_time):
+        """
+        Fetches data from InfluxDB for the given time range.
 
-            df = pd.DataFrame(data)
-            if df.empty:
-                backend_logger.info(
-                    "Influx returned empty data for the given time range."
-                )
-                return df
+        :param start_time: Start time for the query.
+        :param end_time: End time for the query.
+        :return: DataFrame containing the fetched data.
+        """
+        try:
+            read_cfg = self.config.get_influx_config("read")
+            query = self._build_query(start_time, end_time, read_cfg)
+            with InfluxDBClient(url=self.url, token=self.token, org=self.org) as client:
+                result = client.query_api().query(org=self.org, query=query)
+            return self._process_results(result)
+        except Exception as e:
+            self.logger.error(f"Failed to fetch data: {e}")
+            return pd.DataFrame()
 
-            df_pivot = df.pivot_table(
-                index=["Time", "Device"], columns="Measurement", values="Value"
-            ).reset_index()
+    def _process_results(self, result):
+        """
+        Processes the results returned by the InfluxDB query.
 
-            df_pivot["Time"] = pd.to_datetime(df_pivot["Time"], utc=True)
-            df_pivot["Unix"] = df_pivot["Time"].astype("int64") // 10**9
-            if field_temp in df_pivot.columns:
-                df_pivot.rename(columns={field_temp: "Temperature_MW"}, inplace=True)
-            if field_sig in df_pivot.columns:
-                df_pivot.rename(columns={field_sig: "Signal"}, inplace=True)
-
-            df_pivot["sun"] = df_pivot["Time"].apply(
-                lambda t: is_daylight(t, loc["lat"], loc["lng"], loc["tz"])
-            )
-            df_final = df_pivot.rename(columns={"Device": "IP"})
-            print(df_final)
-            return df_final
-
-    except Exception as e:
-        backend_logger.warning(f"Influx get_data failed: {e}")
-
-    return pd.DataFrame()
-
-
-def write_predictions(df_pred, config):
-    write_cfg = config.get_influx_config("write")
-
-    required = {"Time", "Link_ID", "Side", "Predicted_Temperature"}
-    missing = required - set(df_pred.columns)
-    if missing:
-        backend_logger.error(f"Chybí sloupce pro zápis do InfluxDB: {missing}")
-        return False
-
-    try:
-        with InfluxDBClient(
-            url=write_cfg["url"], token=write_cfg["token"], org=write_cfg["org"]
-        ) as client:
-            write_api = client.write_api(write_options=SYNCHRONOUS)
-            points = []
-            for _, row in df_pred.iterrows():
+        :param result: Query result from InfluxDB.
+        :return: Processed DataFrame.
+        """
+        data = []
+        for table in result:
+            for rec in table.records:
                 try:
-                    t_utc = row["Time"].to_pydatetime()
-                    cml_id = str(row["Link_ID"]).strip()
-                    side = str(row["Side"]).strip()
-                    value = float(row["Predicted_Temperature"])
-
-                    p = (
-                        Point(write_cfg["measurement"])
-                        .tag(write_cfg["tag_cml_id"], cml_id)
-                        .tag(write_cfg["tag_side"], side)
-                        .field(write_cfg["field_temperature"], value)
-                        .time(t_utc)
+                    data.append(
+                        {
+                            "Time": rec.get_time(),
+                            "Measurement": rec.values.get("_field"),
+                            "Value": rec.get_value(),
+                            "Device": rec.values.get(
+                                self.config.get_influx_config("read")["tag_device"]
+                            ),
+                        }
                     )
-                    points.append(p)
-                except Exception as row_err:
-                    backend_logger.warning(
-                        f"Přeskakuji řádek kvůli chybě konverze: {row_err}"
-                    )
+                except KeyError as e:
+                    self.logger.warning(f"Missing expected key in record: {e}")
 
-            if points:
+        df = pd.DataFrame(data)
+        if df.empty:
+            self.logger.info("Influx returned empty data for the given time range.")
+            return df
+
+        read_cfg = self.config.get_influx_config("read")
+        field_temp = read_cfg["field_temperature"]
+        field_sig = read_cfg["field_signal"]
+
+        df_pivot = df.pivot_table(
+            index=["Time", "Device"], columns="Measurement", values="Value"
+        ).reset_index()
+
+        df_pivot["Time"] = pd.to_datetime(df_pivot["Time"], utc=True)
+        df_pivot["Unix"] = df_pivot["Time"].astype("int64") // 10**9
+        if field_temp in df_pivot.columns:
+            df_pivot.rename(columns={field_temp: "Temperature_MW"}, inplace=True)
+        if field_sig in df_pivot.columns:
+            df_pivot.rename(columns={field_sig: "Signal"}, inplace=True)
+
+        return df_pivot.rename(columns={"Device": "IP"})
+
+    def write_data(self, df):
+        """
+        Writes data to InfluxDB.
+
+        :param df: DataFrame containing the data to write.
+        """
+        write_cfg = self.config.get_influx_config("write")
+        try:
+            with InfluxDBClient(url=self.url, token=self.token, org=self.org) as client:
+                write_api = client.write_api(write_options=SYNCHRONOUS)
+                points = self._prepare_points(df, write_cfg)
                 write_api.write(bucket=write_cfg["bucket"], record=points)
-                backend_logger.info(
-                    f"Do InfluxDB zapsáno {len(points)} bodů "
-                    f"(bucket='{write_cfg['bucket']}', measurement='{write_cfg['measurement']}')."
+                self.logger.info(f"Wrote {len(points)} points to InfluxDB.")
+        except Exception as e:
+            self.logger.error(f"Failed to write data: {e}")
+
+    def _prepare_points(self, df, write_cfg):
+        """
+        Prepares data points for writing to InfluxDB.
+
+        :param df: DataFrame containing the data.
+        :param write_cfg: Configuration for writing data.
+        :return: List of InfluxDB points.
+        """
+        points = []
+        for _, row in df.iterrows():
+            try:
+                point = (
+                    Point(write_cfg["measurement"])
+                    .tag(write_cfg["tag_cml_id"], row["Link_ID"])
+                    .tag(write_cfg["tag_side"], row["Side"])
+                    .field(write_cfg["field_temperature"], row["Predicted_Temperature"])
+                    .time(row["Time"].to_pydatetime())
                 )
-                return True
-
-            backend_logger.warning("Nebyl připraven žádný bod k zápisu.")
-            return False
-
-    except Exception as e:
-        backend_logger.error(f"Chyba při zápisu do InfluxDB: {e}")
-        return False
+                points.append(point)
+            except Exception as e:
+                self.logger.warning(f"Skipping row due to error: {e}")
+        return points
