@@ -79,6 +79,6 @@ class CalculationEngine:
                 historical_processed = False
 
             self.data_processor.process_time_range(
-                now, now + datetime.timedelta(hours=1)
+                now - datetime.timedelta(hours=1), now,
             )
             wait_for_next_hour()
