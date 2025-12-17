@@ -1,13 +1,13 @@
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
 import os
+matplotlib.use("Agg")
 
 
 class MapVisualizer:
-    """
-    Class for visualizing temperature maps.
-    """
+    """Unified map visualization for both modes."""
 
     def __init__(self, config, logger):
         self.config = config
@@ -15,9 +15,7 @@ class MapVisualizer:
         self.vis = config.get_visualization()
         self.paths = config.get_paths()
 
-    def map_plotting(
-        self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False
-    ):
+    def plot(self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False):
         """
         Plots a temperature map and saves it as an image.
 
@@ -31,7 +29,7 @@ class MapVisualizer:
         try:
             n_levels = self.vis["n_levels"]
             colormap = self.vis["colormap"] or self._default_colormap()
-            median_offset = self.vis["median_offset"]
+            median_offset = self.vis.get("median_offset", 2)
 
             self.logger.info("map_plotting: %s", image_name)
 
@@ -83,6 +81,10 @@ class MapVisualizer:
         except Exception as e:
             self.logger.exception("Exception in map_plotting: %s", e)
             raise
+
+    def map_plotting(self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False):
+        """Alias for backward compatibility."""
+        return self.plot(grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary)
 
     def _default_colormap(self):
         """

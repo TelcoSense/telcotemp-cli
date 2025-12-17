@@ -1,5 +1,5 @@
 [logging]
-level = DEBUG
+level = INFO
 backend_log = app.log
 max_bytes = 10485760
 backups = 1
@@ -8,12 +8,16 @@ fmt = %(asctime)s -%(funcName)s - %(levelname)s - %(message)s
 [paths]
 country_file = country_data/czech_republic.json
 dem_tif = country_data/elevation_data.tif
-images_dir = ./outputs_web
+images_dir = outputs_web
+color_scale_dir = outputs_raw
+saved_grids_dir = saved_grids
 
 [visualization]
 n_levels = 15
 colormap = []
+median_offset = 2
 
 [ml]
+# ML configuration (CML mode only)
 lstm_path = neural/best_lstm_new.keras
 scaler_path = neural/scaler_new.joblib

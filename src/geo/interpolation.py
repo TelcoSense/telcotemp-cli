@@ -5,9 +5,12 @@ from pykrige.rk import RegressionKriging
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.svm import SVR
-
+import warnings
+from scipy.linalg import LinAlgWarning
 
 class SpatialInterpolator:
+    """Unified spatial interpolator for both modes."""
+
     def __init__(self, config, logger):
         """
         Initializes the SpatialInterpolator with configuration parameters.
@@ -51,7 +54,7 @@ class SpatialInterpolator:
                 f"Unknown regression model type: {self.regression_model_type}"
             )
 
-    def _prepare_training_data(self, df, elevation_data, transform_matrix, crs):
+    def _prepare_training_data(self, df, elevation_data, transform_matrix, crs, temp_column):
         """
         Prepares training data for regression kriging.
 
@@ -59,11 +62,12 @@ class SpatialInterpolator:
         :param elevation_data: 2D array of elevation data.
         :param transform_matrix: Affine transformation matrix for the raster.
         :param crs: Coordinate reference system of the raster.
+        :param temp_column: Name of temperature column to use
         :return: Tuple of elevation data, coordinates, temperature values, and mean elevation.
         """
         lon = df["Longitude"].values
         lat = df["Latitude"].values
-        temp = df["Predicted_Temperature"].values
+        temp = df[temp_column].values
 
         to_raster = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
         x_pts_raster, y_pts_raster = to_raster.transform(lon, lat)
@@ -121,6 +125,7 @@ class SpatialInterpolator:
         elevation_data,
         transform_matrix,
         crs,
+        temp_column="Predicted_Temperature",
     ):
         """
         Performs spatial interpolation using regression kriging.
@@ -131,6 +136,7 @@ class SpatialInterpolator:
         :param elevation_data: 2D array of elevation data.
         :param transform_matrix: Affine transformation matrix for the raster.
         :param crs: Coordinate reference system of the raster.
+        :param temp_column: Name of temperature column (Predicted_Temperature or Temperature_Value)
         :return: Tuple of grid X-coordinates, grid Y-coordinates, and predicted temperature grid.
         """
         self.logger.info(
@@ -151,7 +157,7 @@ class SpatialInterpolator:
             valid_points = (
                 df["Longitude"].notna()
                 & df["Latitude"].notna()
-                & df["Predicted_Temperature"].notna()
+                & df[temp_column].notna()
             )
             if valid_points.sum() < 3:
                 raise ValueError(
@@ -159,7 +165,7 @@ class SpatialInterpolator:
                 )
 
             X_train, coords_train, temp, mean_elev = self._prepare_training_data(
-                df.loc[valid_points], elevation_data, transform_matrix, crs
+                df.loc[valid_points], elevation_data, transform_matrix, crs, temp_column
             )
 
             regression_model = self._get_regression_model()
@@ -168,7 +174,9 @@ class SpatialInterpolator:
                 variogram_model=self.variogram_model,
                 n_closest_points=self.nlags,
             )
-            rk.fit(X_train, coords_train, temp)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=LinAlgWarning)
+                rk.fit(X_train, coords_train, temp)
 
             X_pred, coords_pred = self._prepare_prediction_grid(
                 grid_x,
