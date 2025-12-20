@@ -22,9 +22,7 @@ ENV/
 *~
 
 # Config files (keep .dist templates)
-configs/app.ini
-configs/database.ini
-configs/compute.ini
+configs/*.ini
 
 # Logs
 *.log

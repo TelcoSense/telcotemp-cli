@@ -18,11 +18,20 @@ class InfluxWriter:
         self.tag_cml_id = write_cfg["tag_cml_id"]
         self.tag_side = write_cfg["tag_side"]
         self.field_temperature = write_cfg["field_temperature"]
+        
+        # Check if writing is enabled
+        self.write_enabled = config.is_write_enabled()
+        if not self.write_enabled:
+            self.logger.warning("Database writes are DISABLED (debug mode)")
 
     def write(self, df):
         """Write dataframe to InfluxDB."""
         if df.empty:
             self.logger.warning("Empty dataframe, nothing to write")
+            return
+
+        if not self.write_enabled:
+            self.logger.info(f"DEBUG MODE: Skipping write of {len(df)} points to InfluxDB")
             return
 
         points = []

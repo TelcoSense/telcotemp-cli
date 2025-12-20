@@ -1,0 +1,142 @@
+; ============================================================================
+; TELCOTEMP-CLI CONFIGURATION (DISTRIBUTION TEMPLATE)
+; ============================================================================
+; This is a template configuration file for the telcotemp-cli application.
+; Copy this file to config.ini and fill in your actual values.
+; ============================================================================
+
+
+; ============================================================================
+; LOGGING CONFIGURATION
+; ============================================================================
+[logging]
+level = INFO
+backend_log = app.log
+max_bytes = 10485760
+backups = 1
+fmt = %(asctime)s -%(funcName)s - %(levelname)s - %(message)s
+
+
+; ============================================================================
+; FILE PATHS CONFIGURATION
+; ============================================================================
+[paths]
+country_file = country_data/czech_republic.json
+dem_tif = country_data/elevation_data.tif
+images_dir = outputs_web
+color_scale_dir = outputs_raw
+saved_grids_dir = saved_grids
+
+
+; ============================================================================
+; VISUALIZATION CONFIGURATION
+; ============================================================================
+[visualization]
+n_levels = 15
+colormap = []
+median_offset = 2
+
+
+; ============================================================================
+; MACHINE LEARNING CONFIGURATION (CML mode only)
+; ============================================================================
+[ml]
+lstm_path = neural/best_lstm_new.keras
+scaler_path = neural/scaler_new.joblib
+
+
+; ============================================================================
+; GRID COMPUTATION CONFIGURATION
+; ============================================================================
+[grid]
+x_points = 500
+y_points = 500
+mask_resolution_safe = true
+
+
+; ============================================================================
+; INTERPOLATION CONFIGURATION
+; ============================================================================
+[interpolation]
+variogram_model = spherical
+nlags = 40
+regression_model = linear
+
+
+; ============================================================================
+; LOCATION CONFIGURATION (for daylight calculation in CML mode)
+; ============================================================================
+[location]
+lat = 49.8175
+lng = 15.4730
+tz = Europe/Prague
+
+
+; ============================================================================
+; DATABASE CONFIGURATION
+; ============================================================================
+
+; --- MySQL Database ---
+[mysql]
+host = your_mysql_host
+port = 3306
+user = your_mysql_user
+password = your_mysql_password
+
+; --- Common InfluxDB Settings (CML mode) ---
+[influx_common]
+url = http://your_influx_host:8086/
+token = your_influxdb_token_here
+org = your_org_name
+
+
+; ============================================================================
+; CML MODE CONFIGURATION
+; ============================================================================
+
+; --- CML Mode - Read Bucket (InfluxDB) ---
+[influx_read]
+bucket = realtime_cbl
+measurements = 1s10, summit, summit_bt
+fields = Teplota, PrijimanaUroven
+tag_device = agent_host
+field_temperature = Teplota
+field_signal = PrijimanaUroven
+window = 10m
+range = -1h
+
+; --- CML Mode - Write Bucket (InfluxDB) ---
+[influx_write]
+bucket = telcotemp_output
+measurement = telcorain
+tag_cml_id = cml_id
+tag_side = side
+field_temperature = temperature
+; Enable/disable database writing (useful for debugging)
+enable_write = true
+
+
+; ============================================================================
+; METEO MODE CONFIGURATION
+; ============================================================================
+
+; --- Meteo Mode - Read-only Bucket (InfluxDB) ---
+[influx]
+url = http://your_influx_host:8087/
+token = your_influxdb_token_here
+org = your_org_name
+bucket = chmi_data
+measurements = T
+fields = Temperature
+tag_device = agent_host
+field_temperature = Temperature
+window = 10m
+range = -2h
+
+
+; ============================================================================
+; DEBUG CONFIGURATION
+; ============================================================================
+[debug]
+; Disable all database writes (overrides influx_write.enable_write)
+disable_all_writes = false

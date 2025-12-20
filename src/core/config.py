@@ -5,17 +5,16 @@ import os
 class AppConfig:
     """Unified configuration manager for both CML and Meteo modes."""
     
-    def __init__(self, config_dir="configs", mode="combined"):
+    def __init__(self, config_dir="configs", mode="combined", config_file="config.ini"):
         """
         Args:
             config_dir: Path to config directory
             mode: "cml", "meteo", or "combined" - determines data source
+            config_file: Name of the config file (default: config.ini)
         """
         self.config_dir = config_dir
-        self.mode = mode  # Now supports "combined"
-        self.app = self._load("app.ini")
-        self.database = self._load("database.ini")
-        self.compute = self._load("compute.ini")
+        self.mode = mode
+        self.config = self._load(config_file)
 
     def _load(self, filename):
         cfg = configparser.ConfigParser()
@@ -27,7 +26,7 @@ class AppConfig:
 
     # --- APP ---
     def get_logging_config(self):
-        lg = self.app["logging"]
+        lg = self.config["logging"]
         return {
             "level": lg.get("level", "INFO"),
             "backend_log": lg.get("backend_log", "app.log"),
@@ -41,7 +40,7 @@ class AppConfig:
         }
 
     def get_paths(self):
-        p = self.app["paths"]
+        p = self.config["paths"]
         paths = {
             "country_file": p.get("country_file"),
             "dem_tif": p.get("dem_tif"),
@@ -56,7 +55,7 @@ class AppConfig:
         return paths
 
     def get_visualization(self):
-        vis = self.app["visualization"]
+        vis = self.config["visualization"]
         colormap_str = vis.get("colormap", "[]")
         import ast
         try:
@@ -67,6 +66,7 @@ class AppConfig:
         return {
             "n_levels": vis.getint("n_levels", 15),
             "colormap": colormap,
+            "median_offset": vis.getint("median_offset", 2),
         }
 
     def get_ml(self):
@@ -74,10 +74,10 @@ class AppConfig:
         if self.mode != "cml":
             return None
         
-        if "ml" not in self.app:
+        if "ml" not in self.config:
             return None
             
-        ml = self.app["ml"]
+        ml = self.config["ml"]
         return {
             "lstm_path": ml.get("lstm_path"),
             "scaler_path": ml.get("scaler_path"),
@@ -86,7 +86,7 @@ class AppConfig:
     # --- DATABASE / MYSQL ---
     def get_database_credentials(self):
         """For CML mode compatibility."""
-        mysql = self.database["mysql"]
+        mysql = self.config["mysql"]
         return {
             "user": mysql.get("user"),
             "password": mysql.get("password"),
@@ -102,6 +102,25 @@ class AppConfig:
     def get_mysql_config(self):
         """For Meteo mode compatibility."""
         return self.get_database_credentials()
+
+    # --- DEBUG ---
+    def is_write_enabled(self):
+        """
+        Check if database writes are enabled.
+        Returns False if either global debug.disable_all_writes is True
+        or influx_write.enable_write is False.
+        """
+        # Check global debug setting
+        if "debug" in self.config:
+            if self.config["debug"].getboolean("disable_all_writes", False):
+                return False
+        
+        # Check specific influx_write setting (for CML mode)
+        if self.mode == "cml" and "influx_write" in self.config:
+            if not self.config["influx_write"].getboolean("enable_write", True):
+                return False
+        
+        return True
 
     # --- INFLUX ---
     def get_influx_config(self, operation="read"):
@@ -121,13 +140,13 @@ class AppConfig:
             raise ValueError("operation must be 'read' or 'write'")
 
         # Check if influx_common section exists
-        common = self.database["influx_common"] if "influx_common" in self.database else None
+        common = self.config["influx_common"] if "influx_common" in self.config else None
         section_key = f"influx_{operation}"
         
-        if section_key not in self.database:
-            raise KeyError(f"Missing [{section_key}] section in database.ini")
+        if section_key not in self.config:
+            raise KeyError(f"Missing [{section_key}] section in config.ini")
             
-        section = self.database[section_key]
+        section = self.config[section_key]
 
         cfg = {
             "org": common.get("org") if common else section.get("org"),
@@ -161,16 +180,17 @@ class AppConfig:
                 "tag_cml_id": section.get("tag_cml_id", "cml_id"),
                 "tag_side": section.get("tag_side", "side"),
                 "field_temperature": section.get("field_temperature", "temperature"),
+                "enable_write": section.getboolean("enable_write", True),
             })
         
         return cfg
 
     def _get_meteo_influx_config(self):
         """Meteo-specific InfluxDB config (read-only)."""
-        if "influx" not in self.database:
-            raise KeyError("Missing [influx] section in database.ini")
+        if "influx" not in self.config:
+            raise KeyError("Missing [influx] section in config.ini")
             
-        influx = self.database["influx"]
+        influx = self.config["influx"]
         return {
             "org": influx.get("org"),
             "url": influx.get("url"),
@@ -194,7 +214,7 @@ class AppConfig:
 
     # --- COMPUTE ---
     def get_grid_config(self):
-        grid = self.compute["grid"]
+        grid = self.config["grid"]
         return {
             "x_points": grid.getint("x_points", 500),
             "y_points": grid.getint("y_points", 500),
@@ -202,7 +222,7 @@ class AppConfig:
         }
 
     def get_interpolation_config(self):
-        itp = self.compute["interpolation"]
+        itp = self.config["interpolation"]
         return {
             "variogram_model": itp.get("variogram_model", "spherical"),
             "nlags": itp.getint("nlags", 40),
@@ -210,7 +230,7 @@ class AppConfig:
         }
 
     def get_location(self):
-        loc = self.compute["location"]
+        loc = self.config["location"]
         return {
             "lat": loc.getfloat("lat", 49.8175),
             "lng": loc.getfloat("lng", 15.4730),
