@@ -28,7 +28,7 @@ def temperature_predict(df, scaler_path, lstm_model_path):
     df = (
         df.groupby([
             "Hour", "IP", "Latitude", "Longitude", 
-            "Technology", "Side", "Elevation", "Link_ID", "Time"
+            "Technology", "Side", "Elevation", "Link_ID"
         ])["Predicted_Temperature"]
         .median()
         .reset_index()

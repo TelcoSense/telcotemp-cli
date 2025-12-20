@@ -40,7 +40,7 @@ class CalculationEngine:
 
         # Initialize data source based on mode
         if self.mode == "cml":
-            self.data_source = CMLDataSource(config, self.logger, metadata_provider)
+            self.data_source = CMLDataSource(config, self.logger, metadata_provider, geo_components)
             self.influx_writer = InfluxWriter(config, self.logger)
         elif self.mode == "meteo":
             self.data_source = MeteoDataSource(config, self.logger, metadata_provider)
@@ -100,6 +100,7 @@ class CalculationEngine:
 
                 # 4. Interpolation
                 temp_column = self.data_source.get_temperature_column()
+                print(df)
                 grid_x, grid_y, grid_z = self.interpolator.interpolate(
                     df,
                     self.czech_rep,

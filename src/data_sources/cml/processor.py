@@ -2,16 +2,25 @@ from src.data_sources.base import DataSource
 from .influx_reader import CMLInfluxReader
 from pyproj import Transformer
 import pandas as pd
+import numpy as np
+from rasterio.transform import rowcol
 
 
 class CMLDataSource(DataSource):
     """CML-specific data source implementation."""
 
-    def __init__(self, config, logger, metadata_provider):
+    def __init__(self, config, logger, metadata_provider, geo_components):
         super().__init__(config, logger)
         self.influx_reader = CMLInfluxReader(config, logger)
         self.metadata_provider = metadata_provider
-        self.crs = "EPSG:3857"
+
+        (
+            self.geo_proc,
+            self.czech_rep,
+            self.elevation_data,
+            self.transform_matrix,
+            self.crs,
+        ) = geo_components
 
     def fetch_data(self, start_time, end_time):
         """Fetch CML data from InfluxDB."""
@@ -71,8 +80,32 @@ class CMLDataSource(DataSource):
         df["X"] = xs
         df["Y"] = ys
 
-        # Add elevation (placeholder for now - will be filled during interpolation)
-        df["Elevation"] = 0
+        # Calculate elevation from DEM for each point
+        # Transform coordinates to raster CRS
+        to_raster = Transformer.from_crs("EPSG:4326", self.crs, always_xy=True)
+        x_raster, y_raster = to_raster.transform(
+            df["Longitude"].to_numpy(), df["Latitude"].to_numpy()
+        )
+        
+        # Get raster indices using inverse affine transformation
+        inv_affine = ~self.transform_matrix
+        cols_f, rows_f = inv_affine * (x_raster, y_raster)
+        
+        # Round to nearest integer indices
+        cols_i = np.rint(cols_f).astype(np.int64)
+        rows_i = np.rint(rows_f).astype(np.int64)
+        
+        # Check bounds
+        h, w = self.elevation_data.shape
+        in_bounds = (rows_i >= 0) & (rows_i < h) & (cols_i >= 0) & (cols_i < w)
+        
+        # Extract elevation values
+        elevation = np.full(rows_i.shape, np.nan, dtype=np.float32)
+        elevation[in_bounds] = self.elevation_data[
+            rows_i[in_bounds], cols_i[in_bounds]
+        ].astype(np.float32)
+        
+        df["Elevation"] = elevation
 
         self.logger.info(f"Prepared {len(df)} CML records")
         return df
