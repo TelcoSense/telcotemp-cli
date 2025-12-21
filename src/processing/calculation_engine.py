@@ -147,7 +147,7 @@ class CalculationEngine:
         """
         from src.core.initialization import wait_for_next_hour
         
-        historical_processed = False
+        historical_end_time = None  # Track when historical processing ended
 
         if first_run:
             self.logger.info(f"[{self.mode.upper()}] First run: Processing data for the last week.")
@@ -158,8 +158,7 @@ class CalculationEngine:
             self.process_historical_data(
                 historical_start_time, historical_end_time, filter_ids
             )
-            historical_processed = True
-            self.logger.info(f"[{self.mode.upper()}] Switching to regular hourly processing loop.")
+            self.logger.info(f"[{self.mode.upper()}] Historical processing completed. Switching to continuous mode.")
 
         elif start_time and end_time:
             self.logger.info(f"[{self.mode.upper()}] Processing time range: {start_time} to {end_time}")
@@ -175,21 +174,28 @@ class CalculationEngine:
         while True:
             now = datetime.now(timezone.utc)
             
+            # CATCH-UP PHASE: Fill gap between historical processing and now
+            if historical_end_time is not None:
+                current_time = now.replace(minute=0, second=0, microsecond=0)
+                if historical_end_time < current_time:
+                    self.logger.info(
+                        f"[{self.mode.upper()}] Catching up missed hours from "
+                        f"{historical_end_time} to {current_time}"
+                    )
+                    self.process_time_range(historical_end_time, current_time, filter_ids)
+                historical_end_time = None  # Clear flag after catch-up
+            
             # Determine safe processing time based on mode latency
-            # Meteo data is ready at HH:30 for the previous hour (latency ~90 mins safe margin)
-            # CML data is usually faster, but we align to Meteo in combined or if strictly Meteo
             if self.mode == "meteo":
-                # Safe time is now - 90 minutes, floored to hour
                 safe_processing_time = (now - timedelta(minutes=90)).replace(
                     minute=0, second=0, microsecond=0
                 )
             else:
-                # CML can be processed sooner, e.g., 10 mins after hour
                 safe_processing_time = (now - timedelta(minutes=10)).replace(
                     minute=0, second=0, microsecond=0
                 )
 
-            # If we haven't processed this time yet, do it now
+            # Process if not already done
             if last_processed_time != safe_processing_time:
                 self.logger.info(f"[{self.mode.upper()}] Processing safe time window starting: {safe_processing_time}")
                 
@@ -202,9 +208,7 @@ class CalculationEngine:
             else:
                 self.logger.info(f"[{self.mode.upper()}] Time {safe_processing_time} already processed.")
 
-            # Calculate sleep time until next XX:40
-            # If we are currently at XX:15, we wait until XX:40
-            # If we are at XX:45, we wait until (XX+1):40
+            # Sleep until next run
             now = datetime.now(timezone.utc)
             next_run_minute = 40
             
