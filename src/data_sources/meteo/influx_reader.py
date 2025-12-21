@@ -51,7 +51,6 @@ class MeteoInfluxReader(InfluxReader):
         df["Time"] = pd.to_datetime(df["Time"], utc=True)
 
         self.logger.info(f"Fetched {len(df)} Meteo records")
-        print(df)
         return df
 
     def _build_query(self, start_time, end_time):

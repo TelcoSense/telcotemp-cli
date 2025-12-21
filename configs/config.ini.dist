@@ -35,7 +35,8 @@ saved_grids_dir = saved_grids
 n_levels = 15
 colormap = []
 median_offset = 2
-
+; Scale mode: 'dynamic' - based on temperature median, 'static' - fixed temperature scale
+scale_mode = static
 
 ; ============================================================================
 ; MACHINE LEARNING CONFIGURATION (CML mode only)

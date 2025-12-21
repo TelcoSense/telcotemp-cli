@@ -67,6 +67,7 @@ class AppConfig:
             "n_levels": vis.getint("n_levels", 15),
             "colormap": colormap,
             "median_offset": vis.getint("median_offset", 2),
+            "scale_mode": vis.get("scale_mode", "dynamic"),
         }
 
     def get_ml(self):

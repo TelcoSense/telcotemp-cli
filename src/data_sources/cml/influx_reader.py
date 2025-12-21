@@ -65,7 +65,6 @@ class CMLInfluxReader(InfluxReader):
         )
 
         self.logger.info(f"Fetched {len(df_pivot)} CML records")
-        print(df_pivot)
         return df_pivot
 
     def _build_query(self, start_time, end_time):

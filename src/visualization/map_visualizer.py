@@ -14,6 +14,7 @@ class MapVisualizer:
         self.logger = logger
         self.vis = config.get_visualization()
         self.paths = config.get_paths()
+        self.scale_mode = self.vis.get("scale_mode", "dynamic")
 
     def plot(self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False):
         """
@@ -27,18 +28,12 @@ class MapVisualizer:
         :param show_boundary: Whether to display the boundary of the Czech Republic.
         """
         try:
-            n_levels = self.vis["n_levels"]
-            colormap = self.vis["colormap"] or self._default_colormap()
-            median_offset = self.vis.get("median_offset", 2)
-
             self.logger.info("map_plotting: %s", image_name)
 
-            cmap = mcolors.LinearSegmentedColormap.from_list(
-                "custom_colormap", colormap, N=n_levels
-            )
-            temperature_median = np.nanmedian(grid_z) - median_offset
-            vmin = int(temperature_median) - 7
-            vmax = int(temperature_median) + 7
+            if self.scale_mode == "static":
+                cmap, vmin, vmax, colormap_info = self._get_static_scale()
+            else:
+                cmap, vmin, vmax, colormap_info = self._get_dynamic_scale(grid_z)
 
             fig, ax = plt.subplots(figsize=(8, 4), frameon=False)
             c = ax.pcolormesh(
@@ -74,13 +69,65 @@ class MapVisualizer:
             return {
                 "vmin": vmin,
                 "vmax": vmax,
-                "colors": [
-                    {"level": level, "color": color} for level, color in colormap
-                ],
+                "colors": colormap_info,
             }
         except Exception as e:
             self.logger.exception("Exception in map_plotting: %s", e)
             raise
+    
+    def _get_dynamic_scale(self, grid_z):
+        """
+        Returns dynamic color scale based on data median (original behavior).
+        
+        :param grid_z: Temperature grid data
+        :return: (colormap, vmin, vmax, colormap_info)
+        """
+        n_levels = self.vis["n_levels"]
+        colormap = self.vis["colormap"] or self._default_colormap()
+        median_offset = self.vis.get("median_offset", 2)
+        
+        cmap = mcolors.LinearSegmentedColormap.from_list(
+            "custom_colormap", colormap, N=n_levels
+        )
+        
+        temperature_median = np.nanmedian(grid_z) - median_offset
+        vmin = int(temperature_median) - 7
+        vmax = int(temperature_median) + 7
+        
+        colormap_info = [
+            {"level": level, "color": color} 
+            for level, color in colormap
+        ]
+        
+        return cmap, vmin, vmax, colormap_info
+
+    def _get_static_scale(self):
+        """
+        Returns static ČHMÚ color scale.
+        
+        :return: (colormap, vmin, vmax, colormap_info)
+        """
+        chmu_scale = self._static_colormap()
+        temps, colors = zip(*chmu_scale)
+        vmin = temps[0]
+        vmax = temps[-1]
+        
+        # Normalize temperature positions to [0, 1] range
+        normalized_scale = [
+            ((t - vmin) / (vmax - vmin), color) 
+            for t, color in chmu_scale
+        ]
+        
+        cmap = mcolors.LinearSegmentedColormap.from_list(
+            "chmu_colormap", normalized_scale, N=256
+        )
+        
+        colormap_info = [
+            {"level": temp, "color": color} 
+            for temp, color in chmu_scale
+        ]
+        
+        return cmap, vmin, vmax, colormap_info
 
     def map_plotting(self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False):
         """Alias for backward compatibility."""
@@ -107,3 +154,40 @@ class MapVisualizer:
             (13 / 14, "#DB4F08"),
             (1, "#A00000"),
         ]
+    
+    def _static_colormap(self):
+        """
+        Returns static ČHMÚ color scale (temperature in °C, color in hex).
+        Fixed scale from -50°C to +50°C with non-linear intervals.
+        """
+        return [
+            (-50, "#8E00B8"),
+            (-30, "#6A00C8"),
+            (-20, "#0000FF"),
+            (-15, "#0033FF"),
+            (-10, "#0066FF"),
+            (-8,  "#0099FF"),
+            (-6,  "#00CCFF"),
+            (-4,  "#00FFFF"),
+            (-3,  "#66FFFF"),
+            (-2,  "#99FFFF"),
+            (-1,  "#CCFFFF"),
+            (0,   "#66FFCC"),
+            (1,   "#33FF99"),
+            (2,   "#00FF66"),
+            (3,   "#66FF00"),
+            (4,   "#99FF00"),
+            (5,   "#CCFF00"),
+            (6,   "#FFFF00"),
+            (8,   "#FFCC00"),
+            (10,  "#FF9900"),
+            (12,  "#FF6600"),
+            (14,  "#FF3300"),
+            (16,  "#FF0000"),
+            (18,  "#FF0000"),
+            (30,  "#FF0000"),
+            (35,  "#FF0000"),
+            (50,  "#FF0000"),
+]
+
+

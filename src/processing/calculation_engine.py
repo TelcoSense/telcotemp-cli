@@ -100,7 +100,6 @@ class CalculationEngine:
 
                 # 4. Interpolation
                 temp_column = self.data_source.get_temperature_column()
-                print(df)
                 grid_x, grid_y, grid_z = self.interpolator.interpolate(
                     df,
                     self.czech_rep,
