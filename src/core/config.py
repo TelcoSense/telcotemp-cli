@@ -50,6 +50,20 @@ class AppConfig:
             "color_scale_dir": p.get("color_scale_dir", "configs"),
         }
         return paths
+    
+    def get_cleanup_config(self):
+        """Get map cleanup configuration."""
+        if "cleanup" not in self.config:
+            return {
+                "enabled": False,
+                "retention_days": 30,
+            }
+        
+        cu = self.config["cleanup"]
+        return {
+            "enabled": cu.getboolean("enabled", False),
+            "retention_days": cu.getint("retention_days", 30),
+        }
 
     def get_visualization(self):
         vis = self.config["visualization"]

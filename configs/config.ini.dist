@@ -28,6 +28,14 @@ cml_dir = outputs_cml
 color_scale_dir = outputs_raw
 saved_grids_dir = saved_grids
 
+; ============================================================================
+; MAP CLEANUP CONFIGURATION
+; ============================================================================
+[cleanup]
+; Enable/disable automatic cleanup of old map files
+enabled = false
+; Number of days to keep map files (older files will be deleted)
+retention_days = 30
 
 ; ============================================================================
 ; VISUALIZATION CONFIGURATION

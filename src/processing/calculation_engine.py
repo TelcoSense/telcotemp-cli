@@ -7,6 +7,7 @@ from src.visualization.map_visualizer import MapVisualizer
 from src.storage.influx_writer import InfluxWriter
 from src.storage.file_writer import FileWriter
 from src.core.config import AppConfig
+from src.utils.map_cleanup import MapCleanup
 import threading
 import time
 import math
@@ -28,6 +29,7 @@ class CalculationEngine:
         self.config = config
         self.logger = logger_manager.get_logger("backend_logger")
         self.mode = mode_override if mode_override else config.mode
+        self.map_cleanup = MapCleanup(config, self.logger)
 
         # Unpack geo components
         (
@@ -197,6 +199,11 @@ class CalculationEngine:
 
         while True:
             now = datetime.now(timezone.utc)
+
+            # Run cleanup once per day (at 03:00) if enabled
+            if now.hour == 3 and self.map_cleanup.enabled:
+                self.logger.info(f"[{self.mode.upper()}] Running daily map cleanup")
+                self.map_cleanup.cleanup_all_outputs()
             
             # Determine safe processing time based on mode latency (90 minutes back)
             safe_processing_time = (now - timedelta(minutes=90)).replace(
@@ -256,6 +263,7 @@ class CombinedCalculationEngine:
         """
         self.config = config
         self.logger = logger_manager.get_logger("backend_logger")
+        self.map_cleanup = MapCleanup(config, self.logger)
         
         # Create separate configs for each mode
         cml_config = AppConfig(config_dir=config.config_dir, mode="cml")
@@ -425,6 +433,11 @@ class CombinedCalculationEngine:
 
         while True:
             now = datetime.now(timezone.utc)
+
+            # Run cleanup once per day (at 03:00) if enabled
+            if now.hour == 3 and self.map_cleanup.enabled:
+                self.logger.info(f"[COMBINED] Running daily map cleanup")
+                self.map_cleanup.cleanup_all_outputs()
             
             # Safe start time = Current time - 90 minutes, rounded down to hour
             safe_start_time = (now - timedelta(minutes=90)).replace(
