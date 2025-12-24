@@ -146,18 +146,39 @@ class CalculationEngine:
         """
         from src.core.initialization import wait_for_next_hour
         
-        historical_end_time = None  # Track when historical processing ended
-
         if first_run:
             self.logger.info(f"[{self.mode.upper()}] First run: Processing data for the last week.")
-            historical_end_time = datetime.now().replace(
-                minute=0, second=0, microsecond=0
-            )
+            
+            # Calculate historical time range (7 days back)
+            now = datetime.now(timezone.utc)
+            historical_end_time = now.replace(minute=0, second=0, microsecond=0)
             historical_start_time = historical_end_time - timedelta(days=7)
+            
+            # Process historical data
             self.process_historical_data(
                 historical_start_time, historical_end_time, filter_ids
             )
-            self.logger.info(f"[{self.mode.upper()}] Historical processing completed. Switching to continuous mode.")
+            self.logger.info(f"[{self.mode.upper()}] Historical processing completed at {historical_end_time}")
+            
+            # After historical processing, fill the gap to current safe time
+            now_updated = datetime.now(timezone.utc)
+            safe_processing_time = (now_updated - timedelta(minutes=90)).replace(
+                minute=0, second=0, microsecond=0
+            )
+            
+            # If there's a gap between historical end and safe time, fill it
+            if historical_end_time < safe_processing_time:
+                gap_hours = int((safe_processing_time - historical_end_time).total_seconds() / 3600)
+                self.logger.info(
+                    f"[{self.mode.upper()}] Filling gap of {gap_hours} hours from "
+                    f"{historical_end_time} to {safe_processing_time}"
+                )
+                self.process_time_range(historical_end_time, safe_processing_time, filter_ids)
+                self.logger.info(f"[{self.mode.upper()}] Gap filled, now at {safe_processing_time}")
+            else:
+                self.logger.info(f"[{self.mode.upper()}] No gap to fill, ready for continuous mode")
+            
+            self.logger.info(f"[{self.mode.upper()}] Switching to continuous mode.")
 
         elif start_time and end_time:
             self.logger.info(f"[{self.mode.upper()}] Processing time range: {start_time} to {end_time}")
@@ -167,36 +188,22 @@ class CalculationEngine:
         # Continuous loop
         self.logger.info(f"[{self.mode.upper()}] Starting continuous processing")
         
-        # Keep track of the last processed hour to avoid duplicates
         last_processed_time = None
 
         while True:
             now = datetime.now(timezone.utc)
             
-            # CATCH-UP PHASE: Fill gap between historical processing and now
-            if historical_end_time is not None:
-                current_time = now.replace(minute=0, second=0, microsecond=0)
-                if historical_end_time < current_time:
-                    self.logger.info(
-                        f"[{self.mode.upper()}] Catching up missed hours from "
-                        f"{historical_end_time} to {current_time}"
-                    )
-                    self.process_time_range(historical_end_time, current_time, filter_ids)
-                historical_end_time = None  # Clear flag after catch-up
+            # Determine safe processing time based on mode latency (90 minutes back)
+            safe_processing_time = (now - timedelta(minutes=90)).replace(
+                minute=0, second=0, microsecond=0
+            )
             
-            # Determine safe processing time based on mode latency
-            if self.mode == "meteo":
-                safe_processing_time = (now - timedelta(minutes=90)).replace(
-                    minute=0, second=0, microsecond=0
-                )
-            else:
-                safe_processing_time = (now - timedelta(minutes=10)).replace(
-                    minute=0, second=0, microsecond=0
-                )
-
             # Process if not already done
             if last_processed_time != safe_processing_time:
-                self.logger.info(f"[{self.mode.upper()}] Processing safe time window starting: {safe_processing_time}")
+                self.logger.info(
+                    f"[{self.mode.upper()}] Processing safe time window: "
+                    f"{safe_processing_time.strftime('%Y-%m-%d %H:00')}"
+                )
                 
                 self.process_time_range(
                     safe_processing_time, 
@@ -205,9 +212,12 @@ class CalculationEngine:
                 )
                 last_processed_time = safe_processing_time
             else:
-                self.logger.info(f"[{self.mode.upper()}] Time {safe_processing_time} already processed.")
+                self.logger.info(
+                    f"[{self.mode.upper()}] Time {safe_processing_time.strftime('%Y-%m-%d %H:00')} "
+                    f"already processed, waiting for next hour."
+                )
 
-            # Sleep until next run
+            # Sleep until next run (XX:40)
             now = datetime.now(timezone.utc)
             next_run_minute = 40
             
@@ -219,7 +229,10 @@ class CalculationEngine:
                 )
             
             sleep_seconds = (next_run - now).total_seconds()
-            self.logger.info(f"[{self.mode.upper()}] Sleeping {sleep_seconds/60:.1f} minutes until {next_run.strftime('%H:%M')}")
+            self.logger.info(
+                f"[{self.mode.upper()}] Sleeping {sleep_seconds/60:.1f} minutes "
+                f"until {next_run.strftime('%H:%M')}"
+            )
             time.sleep(sleep_seconds)
 
 
@@ -353,25 +366,45 @@ class CombinedCalculationEngine:
         """
         Main data processing loop for combined mode.
         Handles Meteo data availability timing automatically.
-        
-        :param first_run: If True, process last week first
-        :param start_time: Optional custom start time
-        :param end_time: Optional custom end time
-        :param cml_filter_ids: Optional filter for CML links
-        :param meteo_filter_ids: Optional filter for Meteo stations
         """
-        historical_processed = False
         
         if first_run:
             self.logger.info("[COMBINED] First run: Processing data for the last week.")
-            historical_end_time = datetime.now().replace(minute=0, second=0, microsecond=0)
+            
+            # Calculate historical time range (7 days back)
+            now = datetime.now(timezone.utc)
+            historical_end_time = now.replace(minute=0, second=0, microsecond=0)
             historical_start_time = historical_end_time - timedelta(days=7)
+            
+            # Process historical data
             self.process_historical_data(
                 historical_start_time, historical_end_time, 
                 cml_filter_ids, meteo_filter_ids
             )
-            historical_processed = True
-            self.logger.info("[COMBINED] Switching to regular hourly processing loop.")
+            self.logger.info(f"[COMBINED] Historical processing completed at {historical_end_time}")
+            
+            # After historical processing, fill the gap to current safe time
+            now_updated = datetime.now(timezone.utc)
+            safe_start_time = (now_updated - timedelta(minutes=90)).replace(
+                minute=0, second=0, microsecond=0
+            )
+            
+            # If there's a gap between historical end and safe time, fill it
+            if historical_end_time < safe_start_time:
+                gap_hours = int((safe_start_time - historical_end_time).total_seconds() / 3600)
+                self.logger.info(
+                    f"[COMBINED] Filling gap of {gap_hours} hours from "
+                    f"{historical_end_time} to {safe_start_time}"
+                )
+                self.process_time_range(
+                    historical_end_time, safe_start_time, 
+                    cml_filter_ids, meteo_filter_ids
+                )
+                self.logger.info(f"[COMBINED] Gap filled, now at {safe_start_time}")
+            else:
+                self.logger.info("[COMBINED] No gap to fill, ready for continuous mode")
+            
+            self.logger.info("[COMBINED] Switching to continuous mode.")
         
         elif start_time and end_time:
             self.logger.info(f"[COMBINED] Processing time range: {start_time} to {end_time}")
@@ -388,23 +421,18 @@ class CombinedCalculationEngine:
         while True:
             now = datetime.now(timezone.utc)
             
-            # LOGIC: Meteo data for hour H (H:00-H+1:00) is written at H+1:30.
-            # To be safe, we can process hour H only when current time is > H+1:30.
-            # Formula: Safe Start Time = Floor_Hour(Current_Time - 90 minutes)
-            # Example 12:15 -> 10:45 -> 10:00 (Data 10-11 ready at 11:30)
-            # Example 12:40 -> 11:10 -> 11:00 (Data 11-12 ready at 12:30)
-            
+            # Safe start time = Current time - 90 minutes, rounded down to hour
             safe_start_time = (now - timedelta(minutes=90)).replace(
                 minute=0, second=0, microsecond=0
             )
             
             if last_processed_time != safe_start_time:
                 self.logger.info(
-                    f"[COMBINED] Current time: {now.strftime('%H:%M')}. "
-                    f"Processing last complete safe window: {safe_start_time.strftime('%Y-%m-%d %H:00')}"
+                    f"[COMBINED] Processing safe time window: "
+                    f"{safe_start_time.strftime('%Y-%m-%d %H:00')}"
                 )
                 
-                # Process the hour immediately
+                # Process the hour
                 self.process_time_range(
                     safe_start_time, 
                     safe_start_time + timedelta(hours=1), 
@@ -413,10 +441,12 @@ class CombinedCalculationEngine:
                 )
                 last_processed_time = safe_start_time
             else:
-                self.logger.info(f"[COMBINED] Window {safe_start_time} already processed.")
+                self.logger.info(
+                    f"[COMBINED] Window {safe_start_time.strftime('%Y-%m-%d %H:00')} "
+                    f"already processed, waiting for next hour."
+                )
 
             # Schedule next run for XX:40
-            # This ensures we are always past the XX:30 mark when Meteo data is written
             now = datetime.now(timezone.utc)
             next_run_minute = 40
             
@@ -428,5 +458,8 @@ class CombinedCalculationEngine:
                 )
             
             sleep_seconds = (next_run - now).total_seconds()
-            self.logger.info(f"[COMBINED] Sleeping {sleep_seconds/60:.1f} minutes until {next_run.strftime('%H:%M')}")
+            self.logger.info(
+                f"[COMBINED] Sleeping {sleep_seconds/60:.1f} minutes "
+                f"until {next_run.strftime('%H:%M')}"
+            )
             time.sleep(sleep_seconds)

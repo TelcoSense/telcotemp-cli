@@ -53,7 +53,7 @@ scaler_path = neural/scaler_new.joblib
 x_points = 500
 y_points = 500
 mask_resolution_safe = true
-
+save_grids = false
 
 ; ============================================================================
 ; INTERPOLATION CONFIGURATION
@@ -133,11 +133,3 @@ tag_device = agent_host
 field_temperature = Temperature
 window = 10m
 range = -2h
-
-
-; ============================================================================
-; DEBUG CONFIGURATION
-; ============================================================================
-[debug]
-; Disable all database writes (overrides influx_write.enable_write)
-disable_all_writes = false

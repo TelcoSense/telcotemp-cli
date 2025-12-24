@@ -45,13 +45,9 @@ class AppConfig:
             "country_file": p.get("country_file"),
             "dem_tif": p.get("dem_tif"),
             "images_dir": p.get("images_dir", "outputs_web"),
+            "saved_grids_dir": p.get("saved_grids_dir", "saved_grids"),
+            "color_scale_dir": p.get("color_scale_dir", "configs"),
         }
-        # CML mode má navíc color_scale_dir
-        if self.mode == "cml":
-            paths["color_scale_dir"] = p.get("color_scale_dir", "outputs_raw")
-        # Meteo mode má saved_grids_dir
-        if self.mode == "meteo":
-            paths["saved_grids_dir"] = p.get("saved_grids_dir", "saved_grids")
         return paths
 
     def get_visualization(self):
@@ -122,6 +118,15 @@ class AppConfig:
                 return False
         
         return True
+    
+    def is_grid_saving_enabled(self):
+        """
+        Check if saving intermediate grids is enabled.
+        Returns False by default.
+        """
+        if "debug" in self.config:
+            return self.config["debug"].getboolean("save_grids", False)
+        return False
 
     # --- INFLUX ---
     def get_influx_config(self, operation="read"):

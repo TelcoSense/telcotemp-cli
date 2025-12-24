@@ -10,17 +10,17 @@ class FileWriter:
         self.logger = logger
         paths = config.get_paths()
         
-        # CML mode doesn't use saved_grids_dir
-        if config.mode == "meteo":
+        # Enable saving based on config for both modes
+        if config.is_grid_saving_enabled():
             self.save_dir = paths.get("saved_grids_dir", "saved_grids")
             os.makedirs(self.save_dir, exist_ok=True)
         else:
             self.save_dir = None
 
     def save_grid(self, grid_x, grid_y, grid_z, image_name):
-        """Save grid as .npz file (Meteo mode only)."""
+        """Save grid as .npz file."""
         if self.save_dir is None:
-            # CML mode doesn't save grids
+            # Saving is disabled in the config
             return
 
         base_name = os.path.splitext(image_name)[0]
