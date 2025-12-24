@@ -112,9 +112,14 @@ class CalculationEngine:
 
                 # 5. Visualization
                 image_time = current_time.replace(minute=0, second=0, microsecond=0)
-                image_name = f"{self.mode}_{image_time.strftime('%Y-%m-%d_%H%M')}.png"
+                image_name = f"{image_time.strftime('%Y-%m-%d_%H%M')}.png"
+
+                paths = self.config.get_paths()
+                output_dir = paths.get("cml_dir") if self.mode == "cml" else paths.get("meteo_dir")
+
+                ## Determine output directory based on mode
                 self.visualizer.plot(
-                    grid_x, grid_y, grid_z, self.czech_rep, image_name
+                    grid_x, grid_y, grid_z, self.czech_rep, image_name, output_dir
                 )
 
                 # 6. Storage

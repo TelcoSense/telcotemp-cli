@@ -23,7 +23,8 @@ fmt = %(asctime)s -%(funcName)s - %(levelname)s - %(message)s
 [paths]
 country_file = country_data/czech_republic.json
 dem_tif = country_data/elevation_data.tif
-images_dir = outputs_web
+meteo_dir =  outputs_meteo
+cml_dir = outputs_cml
 color_scale_dir = outputs_raw
 saved_grids_dir = saved_grids
 

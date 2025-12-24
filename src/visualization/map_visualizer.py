@@ -16,7 +16,7 @@ class MapVisualizer:
         self.paths = config.get_paths()
         self.scale_mode = self.vis.get("scale_mode", "dynamic")
 
-    def plot(self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False):
+    def plot(self, grid_x, grid_y, grid_z, czech_rep, image_name, output_dir, show_boundary=False):
         """
         Plots a temperature map and saves it as an image.
 
@@ -50,10 +50,9 @@ class MapVisualizer:
                 czech_rep.boundary.plot(ax=ax, linewidth=1, color="black")
             ax.set_axis_off()
 
-            save_dir = self.paths["images_dir"]
-            os.makedirs(save_dir, exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
             base_name, ext = os.path.splitext(image_name)
-            save_path = os.path.join(save_dir, f"{base_name}_{vmin}_{vmax}{ext}")
+            save_path = os.path.join(output_dir, f"{base_name}_{vmin}_{vmax}{ext}")
 
             plt.savefig(
                 save_path,

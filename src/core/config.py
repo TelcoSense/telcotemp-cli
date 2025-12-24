@@ -44,7 +44,8 @@ class AppConfig:
         paths = {
             "country_file": p.get("country_file"),
             "dem_tif": p.get("dem_tif"),
-            "images_dir": p.get("images_dir", "outputs_web"),
+            "meteo_dir": p.get("meteo_dir", "outputs_meteo"),
+            "cml_dir": p.get("cml_dir", "outputs_cml"),
             "saved_grids_dir": p.get("saved_grids_dir", "saved_grids"),
             "color_scale_dir": p.get("color_scale_dir", "configs"),
         }
