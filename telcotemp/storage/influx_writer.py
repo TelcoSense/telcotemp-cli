@@ -1,5 +1,39 @@
+import math
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
+
+
+def _id_to_tag(v) -> str:
+    # Influx tag values are strings; normalize numeric-looking IDs to integer strings.
+    if v is None:
+        return ""
+    try:
+        if isinstance(v, float) and math.isnan(v):
+            return ""
+    except Exception:
+        pass
+
+    # If already a string, handle "1.0" cleanly
+    if isinstance(v, str):
+        s = v.strip()
+        if s == "":
+            return ""
+        try:
+            f = float(s)
+            if f.is_integer():
+                return str(int(f))
+        except Exception:
+            return s  # non-numeric string, keep as-is
+        return s
+
+    # numeric types
+    try:
+        f = float(v)
+        if f.is_integer():
+            return str(int(f))
+        return str(f)
+    except Exception:
+        return str(v)
 
 
 class InfluxWriter:
@@ -18,7 +52,7 @@ class InfluxWriter:
         self.tag_cml_id = write_cfg["tag_cml_id"]
         self.tag_side = write_cfg["tag_side"]
         self.field_temperature = write_cfg["field_temperature"]
-        
+
         # Check if writing is enabled
         self.write_enabled = config.is_write_enabled()
         if not self.write_enabled:
@@ -31,14 +65,19 @@ class InfluxWriter:
             return
 
         if not self.write_enabled:
-            self.logger.info(f"DEBUG MODE: Skipping write of {len(df)} points to InfluxDB")
+            self.logger.info(
+                f"DEBUG MODE: Skipping write of {len(df)} points to InfluxDB"
+            )
             return
 
         points = []
         for _, row in df.iterrows():
+            cml_id_tag = _id_to_tag(row["Link_ID"])
+            if not cml_id_tag:
+                continue  # skip rows with missing ID
             point = (
                 Point(self.measurement)
-                .tag(self.tag_cml_id, str(row["Link_ID"]))
+                .tag(self.tag_cml_id, cml_id_tag)
                 .tag(self.tag_side, str(row["Side"]))
                 .field(self.field_temperature, float(row["Predicted_Temperature"]))
                 .time(row["Time"].to_pydatetime())
