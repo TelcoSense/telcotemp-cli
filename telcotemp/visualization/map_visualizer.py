@@ -60,7 +60,8 @@ class MapVisualizer:
 
             os.makedirs(output_dir, exist_ok=True)
             base_name, ext = os.path.splitext(image_name)
-            save_path = os.path.join(output_dir, f"{base_name}_{vmin}_{vmax}{ext}")
+            # save_path = os.path.join(output_dir, f"{base_name}_{vmin}_{vmax}{ext}")
+            save_path = os.path.join(output_dir, f"{base_name}{ext}")
 
             plt.savefig(
                 save_path,
