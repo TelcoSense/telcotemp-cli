@@ -86,8 +86,8 @@ window = 10m
 range = -1h
 
 [influx_write]
-bucket = telcotemp_output
-measurement = telcorain
+bucket = telcorain_output
+measurement = telcotemp
 tag_cml_id = cml_id
 tag_side = side
 field_temperature = temperature
