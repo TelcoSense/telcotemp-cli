@@ -1,4 +1,4 @@
-# telcotemp-cli
+# TelcoTemp
 TelcoTemp CLI for temperature predictions based on operational data from CML and/or meteo stations. It computes temperature maps for every hour and stores them locally in png format. 
 
 The main processes include:
