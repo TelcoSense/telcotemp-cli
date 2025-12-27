@@ -1,4 +1,4 @@
-from src.data_sources.base import DataSource
+from telcotemp.data_sources.base import DataSource
 from .influx_reader import MeteoInfluxReader
 from pyproj import Transformer
 

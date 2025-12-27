@@ -1,4 +1,4 @@
-from src.data_sources.base import DataSource
+from telcotemp.data_sources.base import DataSource
 from .influx_reader import CMLInfluxReader
 from pyproj import Transformer
 import pandas as pd
@@ -48,7 +48,9 @@ class CMLDataSource(DataSource):
         df["Longitude"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("lon"))
         df["Azimuth"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("azimuth"))
         df["Link_ID"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("link_id"))
-        df["Technology"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("technology"))
+        df["Technology"] = df["IP"].map(
+            lambda ip: metadata.get(ip, {}).get("technology")
+        )
         df["Side"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("side"))
 
         # Drop rows without metadata
@@ -64,7 +66,8 @@ class CMLDataSource(DataSource):
             self.logger.info(f"Filtered to {len(df)} records for specified link_ids")
 
         # Add daylight flag
-        from src.utils.time_utils import is_daylight
+        from telcotemp.utils.time_utils import is_daylight
+
         location = self.config.get_location()
         df["sun"] = df["Time"].apply(
             lambda ts: is_daylight(ts, location["lat"], location["lng"], location["tz"])
@@ -86,25 +89,25 @@ class CMLDataSource(DataSource):
         x_raster, y_raster = to_raster.transform(
             df["Longitude"].to_numpy(), df["Latitude"].to_numpy()
         )
-        
+
         # Get raster indices using inverse affine transformation
         inv_affine = ~self.transform_matrix
         cols_f, rows_f = inv_affine * (x_raster, y_raster)
-        
+
         # Round to nearest integer indices
         cols_i = np.rint(cols_f).astype(np.int64)
         rows_i = np.rint(rows_f).astype(np.int64)
-        
+
         # Check bounds
         h, w = self.elevation_data.shape
         in_bounds = (rows_i >= 0) & (rows_i < h) & (cols_i >= 0) & (cols_i < w)
-        
+
         # Extract elevation values
         elevation = np.full(rows_i.shape, np.nan, dtype=np.float32)
         elevation[in_bounds] = self.elevation_data[
             rows_i[in_bounds], cols_i[in_bounds]
         ].astype(np.float32)
-        
+
         df["Elevation"] = elevation
 
         self.logger.info(f"Prepared {len(df)} CML records")

@@ -20,6 +20,5 @@ Set the configs: start the MariaDB and InfluxDB instances and provide IPs and pa
 
 Run the calculation:
 ```
-python ./main.py
+python ./run.py
 ```
-

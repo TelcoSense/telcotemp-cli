@@ -1,6 +1,6 @@
 from influxdb_client import InfluxDBClient
 import pandas as pd
-from src.data_sources.base import InfluxReader
+from telcotemp.data_sources.base import InfluxReader
 
 
 class MeteoInfluxReader(InfluxReader):
@@ -58,7 +58,9 @@ class MeteoInfluxReader(InfluxReader):
         start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         end_iso = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        measurements_filter = " or ".join([f'r["_measurement"] == "{m}"' for m in self.measurements])
+        measurements_filter = " or ".join(
+            [f'r["_measurement"] == "{m}"' for m in self.measurements]
+        )
 
         query = f"""
 from(bucket: "{self.bucket}")

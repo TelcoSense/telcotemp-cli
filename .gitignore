@@ -30,6 +30,8 @@ configs/*.ini
 
 # Output directories
 outputs_web/
+outputs_cml/
+outputs_meteo/
 outputs_raw/
 saved_grids/
 

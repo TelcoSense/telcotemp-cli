@@ -1,6 +1,6 @@
 from influxdb_client import InfluxDBClient
 import pandas as pd
-from src.data_sources.base import InfluxReader
+from telcotemp.data_sources.base import InfluxReader
 
 
 class CMLInfluxReader(InfluxReader):
@@ -21,7 +21,6 @@ class CMLInfluxReader(InfluxReader):
         self.tag_device = influx_cfg["tag_device"]
 
     def read(self, start_time, end_time):
-
         """Fetch CML data and pivot Temperature_MW + Signal."""
         query = self._build_query(start_time, end_time)
 
@@ -60,7 +59,11 @@ class CMLInfluxReader(InfluxReader):
 
         df_pivot["Time"] = pd.to_datetime(df_pivot["Time"], utc=True)
         df_pivot.rename(
-            columns={"Device": "IP", "Teplota": "Temperature_MW", "PrijimanaUroven": "Signal"},
+            columns={
+                "Device": "IP",
+                "Teplota": "Temperature_MW",
+                "PrijimanaUroven": "Signal",
+            },
             inplace=True,
         )
 
@@ -72,7 +75,9 @@ class CMLInfluxReader(InfluxReader):
         start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         end_iso = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        measurements = " or ".join([f'r["_measurement"] == "{m}"' for m in self.measurements])
+        measurements = " or ".join(
+            [f'r["_measurement"] == "{m}"' for m in self.measurements]
+        )
         fields = " or ".join([f'r["_field"] == "{f}"' for f in self.fields])
 
         return f"""

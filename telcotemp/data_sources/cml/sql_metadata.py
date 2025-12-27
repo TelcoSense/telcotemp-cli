@@ -1,5 +1,5 @@
 from sqlalchemy import text
-from src.data_sources.base import MetadataProvider
+from telcotemp.data_sources.base import MetadataProvider
 import time
 
 
@@ -14,17 +14,20 @@ class CMLMetadataProvider(MetadataProvider):
     def fetch_metadata(self, ips):
         """Fetch metadata for CML IPs."""
         t0 = time.perf_counter()
-        
+
         # Check cache
         cached = [ip for ip in ips if ip in self._cache]
         missing = [ip for ip in ips if ip not in self._cache]
 
-        self.logger.debug(f"Metadata fetch: {len(cached)} cached, {len(missing)} to fetch")
+        self.logger.debug(
+            f"Metadata fetch: {len(cached)} cached, {len(missing)} to fetch"
+        )
 
         if missing:
             placeholders = ",".join([f"'{ip}'" for ip in missing])
-            
-            query = text(f"""
+
+            query = text(
+                f"""
                 SELECT
                     l.ID AS link_id,
                     l.technology AS technology,
@@ -43,7 +46,8 @@ class CMLMetadataProvider(MetadataProvider):
                 ) x ON x.ID = l.ID
                 JOIN cml_metadata.sites s ON s.id = x.site_id
                 WHERE x.ip IN ({placeholders})
-            """)
+            """
+            )
 
             try:
                 with self.engine.connect() as conn:
@@ -58,9 +62,11 @@ class CMLMetadataProvider(MetadataProvider):
                             "lat": row.lat,
                             "lon": row.lon,
                         }
-                    
-                    self.logger.debug(f"Fetched metadata for {len(self._cache) - len(cached)} new IPs")
-                    
+
+                    self.logger.debug(
+                        f"Fetched metadata for {len(self._cache) - len(cached)} new IPs"
+                    )
+
             except Exception as e:
                 self.logger.error(f"Error fetching metadata: {e}")
 

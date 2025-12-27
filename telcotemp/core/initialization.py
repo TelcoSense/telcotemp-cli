@@ -1,8 +1,7 @@
-
 from sqlalchemy import create_engine
-from src.data_sources.cml.sql_metadata import CMLMetadataProvider
-from src.data_sources.meteo.sql_metadata import MeteoMetadataProvider
-from src.geo.geographical_processing import GeographicalProcessing
+from telcotemp.data_sources.cml.sql_metadata import CMLMetadataProvider
+from telcotemp.data_sources.meteo.sql_metadata import MeteoMetadataProvider
+from telcotemp.geo.geographical_processing import GeographicalProcessing
 import datetime
 import time
 
@@ -27,7 +26,7 @@ def initialize_database(config, logger):
     engine = create_engine(
         f"mysql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}"
     )
-    
+
     if config.mode == "cml":
         return engine, CMLMetadataProvider(engine, logger)
     elif config.mode == "meteo":
@@ -45,15 +44,15 @@ def initialize_geographical_processing(config):
     """Initialize geographical processing and load country/elevation data."""
     geo_proc = GeographicalProcessing()
     paths = config.get_paths()
-    
+
     state = geo_proc.load_country_data(paths["country_file"])
     czech_rep = geo_proc.json_to_geodataframe(state)
-    
+
     # Pro všechny režimy konvertuj do EPSG:3857
     czech_rep = czech_rep.to_crs("EPSG:3857")
-    
+
     elevation_data, transform_matrix, crs = geo_proc.load_elevation_data(
         paths["dem_tif"]
     )
-    
+
     return geo_proc, czech_rep, elevation_data, transform_matrix, crs

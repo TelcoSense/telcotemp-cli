@@ -1,3 +1,5 @@
+import os
+import sys
 import numpy as np
 from rasterio.transform import rowcol
 from pyproj import Transformer
@@ -7,6 +9,19 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.svm import SVR
 import warnings
 from scipy.linalg import LinAlgWarning
+from contextlib import contextmanager
+
+
+@contextmanager
+def suppress_stdout():
+    old = sys.stdout
+    try:
+        with open(os.devnull, "w") as f:
+            sys.stdout = f
+            yield
+    finally:
+        sys.stdout = old
+
 
 class SpatialInterpolator:
     """Unified spatial interpolator for both modes."""
@@ -54,7 +69,9 @@ class SpatialInterpolator:
                 f"Unknown regression model type: {self.regression_model_type}"
             )
 
-    def _prepare_training_data(self, df, elevation_data, transform_matrix, crs, temp_column):
+    def _prepare_training_data(
+        self, df, elevation_data, transform_matrix, crs, temp_column
+    ):
         """
         Prepares training data for regression kriging.
 
@@ -176,7 +193,8 @@ class SpatialInterpolator:
             )
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=LinAlgWarning)
-                rk.fit(X_train, coords_train, temp)
+                with suppress_stdout():
+                    rk.fit(X_train, coords_train, temp)
 
             X_pred, coords_pred = self._prepare_prediction_grid(
                 grid_x,
@@ -187,7 +205,10 @@ class SpatialInterpolator:
                 rep_crs,
                 mean_elev,
             )
-            grid_predicted_temp = rk.predict(X_pred, coords_pred).reshape(grid_x.shape)
+            with suppress_stdout():
+                grid_predicted_temp = rk.predict(X_pred, coords_pred).reshape(
+                    grid_x.shape
+                )
 
             grid_predicted_temp = np.where(
                 mask.reshape(grid_x.shape), grid_predicted_temp, np.nan
