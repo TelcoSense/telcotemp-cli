@@ -1,0 +1,107 @@
+; ============================================================================
+; TELCOTEMP-CLI CONFIGURATION (DISTRIBUTION TEMPLATE)
+; ============================================================================
+; This is a template configuration file for the telcotemp-cli application.
+; Copy this file to config.ini and fill in your actual values.
+; ============================================================================
+
+
+; LOGGING CONFIGURATION
+[logging]
+level = INFO
+backend_log = app.log
+max_bytes = 10485760
+backups = 1
+fmt = %(asctime)s -%(funcName)s - %(levelname)s - %(message)s
+
+; FILE PATHS CONFIGURATION
+[paths]
+country_file = country_data/czech_republic.json
+dem_tif = country_data/elevation_data.tif
+meteo_dir =  outputs_meteo
+cml_dir = outputs_cml
+color_scale_dir = outputs_raw
+saved_grids_dir = saved_grids
+
+; MAP CLEANUP CONFIGURATION
+[cleanup]
+; Enable/disable automatic cleanup of old map files
+enabled = false
+; Number of days to keep map files (older files will be deleted)
+retention_days = 30
+
+; VISUALIZATION CONFIGURATION
+[visualization]
+n_levels = 15
+colormap = []
+median_offset = 2
+; Scale mode: 'dynamic' - based on temperature median, 'static' - fixed temperature scale
+scale_mode = static
+
+; MACHINE LEARNING CONFIGURATION (CML mode)
+[ml]
+lstm_path = telcotemp/neural/best_lstm_new.keras
+scaler_path = telcotemp/neural/scaler_new.joblib
+
+; GRID COMPUTATION CONFIGURATION
+[grid]
+x_points = 500
+y_points = 500
+mask_resolution_safe = true
+save_grids = false
+
+; INTERPOLATION CONFIGURATION
+[interpolation]
+variogram_model = spherical
+nlags = 40
+regression_model = linear
+
+; LOCATION CONFIGURATION (for daylight calculation in CML mode)
+[location]
+lat = 49.8175
+lng = 15.4730
+tz = Europe/Prague
+
+; DATABASE CONFIGURATION
+[mysql]
+host = 
+port = 3306
+user = 
+password = 
+
+[influx_common]
+url = 
+token = 
+org = 
+
+; CML MODE CONFIGURATION
+[influx_read]
+bucket = realtime_cbl
+measurements = 1s10, summit, summit_bt
+fields = Teplota, PrijimanaUroven
+tag_device = agent_host
+field_temperature = Teplota
+field_signal = PrijimanaUroven
+window = 10m
+range = -1h
+
+[influx_write]
+bucket = telcotemp_output
+measurement = telcorain
+tag_cml_id = cml_id
+tag_side = side
+field_temperature = temperature
+enable_write = false
+
+; METEO MODE CONFIGURATION
+[influx]
+url = 
+token = 
+org = 
+bucket = chmi_data
+measurements = T
+fields = Temperature
+tag_device = agent_host
+field_temperature = Temperature
+window = 10m
+range = -2h

@@ -1,5 +1,5 @@
-# telcotemp-cli
-TelcoTemp CLI for temperature predictions based on operational data from CML. It computes temperature maps for every hour and stores them locally in png format. 
+# TelcoTemp
+TelcoTemp CLI for temperature predictions based on operational data from CML and/or meteo stations. It computes temperature maps for every hour and stores them locally in png format. 
 
 The main processes include:
 
@@ -10,16 +10,15 @@ The main processes include:
 5. **Configuration & logging** — use config files to control behavior; log steps / errors for traceability.
 
 # HOW TO RUN 
-Activate the virtual env and install requirements.txt, e.g.:
+Activate the virtual env and install dependecies using either conda env in env_info/*.yml or requirements.txt, e.g.:
 
 ```
-pip install -r requirements.txt
+pip install -r env_info/requirements.txt
 ```
 
 Set the configs: start the MariaDB and InfluxDB instances and provide IPs and passwords/tokens.
 
-Run the calculation:
+Run the combined calculation by:
 ```
-python ./main.py
+python ./run.py
 ```
-
