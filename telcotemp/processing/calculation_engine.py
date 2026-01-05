@@ -11,6 +11,7 @@ from telcotemp.utils.map_cleanup import MapCleanup
 import threading
 import time
 import math
+import numpy as np
 
 
 class CalculationEngine:
@@ -131,7 +132,26 @@ class CalculationEngine:
 
                 # 5. Visualization
                 image_time = current_time.replace(minute=0, second=0, microsecond=0)
-                image_name = f"{image_time.strftime('%Y-%m-%d_%H%M')}.png"
+
+                # Compute segment-level median temperature for filename (across all links/stations in this hour)
+                try:
+                    vals = df[temp_column].to_numpy(dtype=float)
+                    seg_temp = float(np.nanmedian(vals))
+                except Exception:
+                    seg_temp = float("nan")
+
+                # Use 1 decimal place; if missing, fall back to 'NA'
+                if math.isnan(seg_temp):
+                    seg_temp_str = "NA"
+                else:
+                    # avoid '-0.0'
+                    if abs(seg_temp) < 0.05:
+                        seg_temp = 0.0
+                    seg_temp_str = f"{seg_temp:.1f}"
+
+                image_name = (
+                    f"{image_time.strftime('%Y-%m-%d_%H%M')}_{seg_temp_str}.png"
+                )
 
                 paths = self.config.get_paths()
                 output_dir = (
