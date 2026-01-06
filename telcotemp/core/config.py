@@ -4,7 +4,7 @@ import os
 
 class AppConfig:
     """Unified configuration manager for both CML and Meteo modes."""
-    
+
     def __init__(self, config_dir="configs", mode="combined", config_file="config.ini"):
         """
         Args:
@@ -39,6 +39,13 @@ class AppConfig:
             ),
         }
 
+    def get_diagnostics_config(self):
+        dc = self.config["diagnostics"]
+        return {
+            "enable_bias_report": dc.getboolean("enable_bias_report", True),
+            "bias_report_dir": dc.get("bias_report_dir", "outputs_diagnostics"),
+        }
+
     def get_paths(self):
         p = self.config["paths"]
         paths = {
@@ -50,7 +57,7 @@ class AppConfig:
             "color_scale_dir": p.get("color_scale_dir", "configs"),
         }
         return paths
-    
+
     def get_cleanup_config(self):
         """Get map cleanup configuration."""
         if "cleanup" not in self.config:
@@ -58,7 +65,7 @@ class AppConfig:
                 "enabled": False,
                 "retention_days": 30,
             }
-        
+
         cu = self.config["cleanup"]
         return {
             "enabled": cu.getboolean("enabled", False),
@@ -69,11 +76,12 @@ class AppConfig:
         vis = self.config["visualization"]
         colormap_str = vis.get("colormap", "[]")
         import ast
+
         try:
             colormap = ast.literal_eval(colormap_str) if colormap_str.strip() else []
         except:
             colormap = []
-        
+
         return {
             "n_levels": vis.getint("n_levels", 15),
             "colormap": colormap,
@@ -85,14 +93,15 @@ class AppConfig:
         """Returns ML config - only for CML mode."""
         if self.mode != "cml":
             return None
-        
+
         if "ml" not in self.config:
             return None
-            
+
         ml = self.config["ml"]
         return {
             "lstm_path": ml.get("lstm_path"),
             "scaler_path": ml.get("scaler_path"),
+            "bias_offset": float(ml.get("bias_offset", "0.0")),
         }
 
     # --- DATABASE / MYSQL ---
@@ -126,14 +135,14 @@ class AppConfig:
         if "debug" in self.config:
             if self.config["debug"].getboolean("disable_all_writes", False):
                 return False
-        
+
         # Check specific influx_write setting (for CML mode)
         if self.mode == "cml" and "influx_write" in self.config:
             if not self.config["influx_write"].getboolean("enable_write", True):
                 return False
-        
+
         return True
-    
+
     def is_grid_saving_enabled(self):
         """
         Check if saving intermediate grids is enabled.
@@ -161,12 +170,14 @@ class AppConfig:
             raise ValueError("operation must be 'read' or 'write'")
 
         # Check if influx_common section exists
-        common = self.config["influx_common"] if "influx_common" in self.config else None
+        common = (
+            self.config["influx_common"] if "influx_common" in self.config else None
+        )
         section_key = f"influx_{operation}"
-        
+
         if section_key not in self.config:
             raise KeyError(f"Missing [{section_key}] section in config.ini")
-            
+
         section = self.config[section_key]
 
         cfg = {
@@ -176,41 +187,47 @@ class AppConfig:
         }
 
         if operation == "read":
-            cfg.update({
-                "bucket": section.get("bucket", "realtime_cbl"),
-                "measurements": [
-                    s.strip()
-                    for s in section.get("measurements", "").split(",")
-                    if s.strip()
-                ],
-                "fields": [
-                    s.strip()
-                    for s in section.get("fields", "").split(",")
-                    if s.strip()
-                ],
-                "tag_device": section.get("tag_device", "agent_host"),
-                "field_temperature": section.get("field_temperature", "Teplota"),
-                "field_signal": section.get("field_signal", "PrijimanaUroven"),
-                "window": section.get("window", "10m"),
-                "range": section.get("range", "-1h"),
-            })
+            cfg.update(
+                {
+                    "bucket": section.get("bucket", "realtime_cbl"),
+                    "measurements": [
+                        s.strip()
+                        for s in section.get("measurements", "").split(",")
+                        if s.strip()
+                    ],
+                    "fields": [
+                        s.strip()
+                        for s in section.get("fields", "").split(",")
+                        if s.strip()
+                    ],
+                    "tag_device": section.get("tag_device", "agent_host"),
+                    "field_temperature": section.get("field_temperature", "Teplota"),
+                    "field_signal": section.get("field_signal", "PrijimanaUroven"),
+                    "window": section.get("window", "10m"),
+                    "range": section.get("range", "-1h"),
+                }
+            )
         else:  # write
-            cfg.update({
-                "bucket": section.get("bucket", "telcotemp_output"),
-                "measurement": section.get("measurement", "telcorain"),
-                "tag_cml_id": section.get("tag_cml_id", "cml_id"),
-                "tag_side": section.get("tag_side", "side"),
-                "field_temperature": section.get("field_temperature", "temperature"),
-                "enable_write": section.getboolean("enable_write", True),
-            })
-        
+            cfg.update(
+                {
+                    "bucket": section.get("bucket", "telcotemp_output"),
+                    "measurement": section.get("measurement", "telcorain"),
+                    "tag_cml_id": section.get("tag_cml_id", "cml_id"),
+                    "tag_side": section.get("tag_side", "side"),
+                    "field_temperature": section.get(
+                        "field_temperature", "temperature"
+                    ),
+                    "enable_write": section.getboolean("enable_write", True),
+                }
+            )
+
         return cfg
 
     def _get_meteo_influx_config(self):
         """Meteo-specific InfluxDB config (read-only)."""
         if "influx" not in self.config:
             raise KeyError("Missing [influx] section in config.ini")
-            
+
         influx = self.config["influx"]
         return {
             "org": influx.get("org"),

@@ -89,6 +89,21 @@ class SpatialInterpolator:
         to_raster = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
         x_pts_raster, y_pts_raster = to_raster.transform(lon, lat)
 
+        df2 = df[[temp_column]].copy()
+        df2["_x"] = x_pts_raster
+        df2["_y"] = y_pts_raster
+
+        # rounding in meters in raster CRS; 1–10 m usually enough
+        round_m = 1.0
+        df2["_xr"] = (df2["_x"] / round_m).round(0) * round_m
+        df2["_yr"] = (df2["_y"] / round_m).round(0) * round_m
+
+        df2 = df2.groupby(["_xr", "_yr"], as_index=False)[temp_column].median()
+
+        x_pts_raster = df2["_xr"].to_numpy()
+        y_pts_raster = df2["_yr"].to_numpy()
+        temp = df2[temp_column].to_numpy()
+
         rows, cols = rowcol(transform_matrix, x_pts_raster, y_pts_raster)
         rows = np.clip(np.floor(rows).astype(int), 0, elevation_data.shape[0] - 1)
         cols = np.clip(np.floor(cols).astype(int), 0, elevation_data.shape[1] - 1)

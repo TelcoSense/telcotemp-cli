@@ -33,6 +33,7 @@ outputs_web/
 outputs_cml/
 outputs_meteo/
 outputs_raw/
+outputs_diagnostics/
 saved_grids/
 
 # OS

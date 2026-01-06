@@ -2,7 +2,7 @@ import joblib
 from tensorflow.keras.models import load_model
 
 
-def temperature_predict(df, scaler_path, lstm_model_path):
+def temperature_predict(df, scaler_path, lstm_model_path, bias_offset):
     col_order = [
         "Temperature_MW",
         "sun",
@@ -26,6 +26,9 @@ def temperature_predict(df, scaler_path, lstm_model_path):
     model = load_model(lstm_model_path, compile=False)
     predicted = model.predict(X_reshaped, verbose=0).flatten()
 
+    # Global bias correction (°C): Predicted_Temperature = model_pred + bias_offset
+    predicted = predicted + float(bias_offset)
+
     df["Predicted_Temperature"] = predicted
 
     # Keep 10-minute timestamps (no hourly aggregation)
@@ -38,12 +41,12 @@ def temperature_predict(df, scaler_path, lstm_model_path):
         "Side",
         "Elevation",
         "Link_ID",
+        "sun",
+        "Hour",
         "Predicted_Temperature",
     ]
     df = df[out_cols]
 
-    # Optional: if duplicates exist for the same (Time, Link_ID, Side), collapse them.
-    # This keeps 10-min, but guarantees unique points for Influx.
     df = df.groupby(
         [
             "Time",
@@ -54,6 +57,8 @@ def temperature_predict(df, scaler_path, lstm_model_path):
             "Longitude",
             "Technology",
             "Elevation",
+            "sun",
+            "Hour",
         ],
         as_index=False,
     )["Predicted_Temperature"].median()

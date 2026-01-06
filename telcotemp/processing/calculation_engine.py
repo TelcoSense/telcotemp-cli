@@ -106,7 +106,10 @@ class CalculationEngine:
                     ml_cfg = self.config.get_ml()
                     if ml_cfg:
                         df = temperature_predict(
-                            df, ml_cfg["scaler_path"], ml_cfg["lstm_path"]
+                            df,
+                            ml_cfg["scaler_path"],
+                            ml_cfg["lstm_path"],
+                            ml_cfg["bias_offset"],
                         )
                         self.logger.info(
                             f"[{self.mode.upper()}] ML prediction completed"
@@ -441,6 +444,23 @@ class CombinedCalculationEngine:
                 # Wait for completion
                 cml_thread.join()
                 meteo_thread.join()
+
+                ##### debug
+                from telcotemp.utils.diagnostics import run_bias_report
+
+                diag_conf = self.config.get_diagnostics_config()
+
+                # or implement proper AppConfig getter
+                if diag_conf["enable_bias_report"]:
+                    self.logger.info("[COMBINED] Bias report enabled")
+                    out_dir = diag_conf["bias_report_dir"]
+                    run_bias_report(
+                        cml_engine=self.cml_engine,
+                        meteo_engine=self.meteo_engine,
+                        start_time=hour_start,
+                        end_time=hour_end,
+                        out_dir=out_dir,
+                    )
 
             self.logger.info(
                 f"[COMBINED] Completed processing for {hour_start.strftime('%Y-%m-%d %H:%M')}"
