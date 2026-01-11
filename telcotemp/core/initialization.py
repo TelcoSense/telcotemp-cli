@@ -31,8 +31,8 @@ def initialize_database(config, logger):
         return engine, CMLMetadataProvider(engine, logger)
     elif config.mode == "meteo":
         return engine, MeteoMetadataProvider(engine, logger)
-    elif config.mode == "combined":
-        # Return both metadata providers
+    elif config.mode in ["combined", "merged"]:
+        # Return both metadata providers for combined and merged modes
         cml_provider = CMLMetadataProvider(engine, logger)
         meteo_provider = MeteoMetadataProvider(engine, logger)
         return engine, (cml_provider, meteo_provider)

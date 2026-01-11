@@ -1,6 +1,6 @@
 """
 TelcoTemp -- Temperature Monitoring and Visualization System
-Supports both CML (microwave links), Meteo (weather stations), and Combined modes
+Supports CML (microwave links), Meteo (weather stations), Combined, and Merged modes
 """
 
 import os
@@ -21,6 +21,7 @@ from telcotemp.core.initialization import (
 from telcotemp.processing.calculation_engine import (
     CalculationEngine,
     CombinedCalculationEngine,
+    MergedCalculationEngine,
 )
 import argparse
 import datetime
@@ -28,13 +29,13 @@ import sys
 
 
 class Application:
-    """Unified CLI application for CML, Meteo, and Combined modes."""
+    """Unified CLI application for CML, Meteo, Combined, and Merged modes."""
 
     def __init__(self, mode="combined"):
         """
         Initialize application.
 
-        :param mode: "cml", "meteo", or "combined"
+        :param mode: "cml", "meteo", "combined", or "merged"
         """
         try:
             self.config = AppConfig(mode=mode)
@@ -55,6 +56,15 @@ class Application:
             if mode == "combined":
                 cml_provider, meteo_provider = self.metadata_provider
                 self.calculation_engine = CombinedCalculationEngine(
+                    self.config,
+                    self.logger_manager,
+                    cml_provider,
+                    meteo_provider,
+                    self.geo_components,
+                )
+            elif mode == "merged":
+                cml_provider, meteo_provider = self.metadata_provider
+                self.calculation_engine = MergedCalculationEngine(
                     self.config,
                     self.logger_manager,
                     cml_provider,
@@ -94,22 +104,28 @@ Examples:
   # Combined mode - specific time range
   python run.py --start_time "2024-01-01 00:00" --end_time "2024-01-02 00:00"
   
+  # Merged mode - single map from both sources
+  python run.py --mode merged --first_run
+  
+  # Merged mode - continuous processing
+  python run.py --mode merged --continuous
+  
   # CML mode only
-  python marunin.py --mode cml --start_time "2024-01-01 00:00" --end_time "2024-01-02 00:00"
+  python run.py --mode cml --start_time "2024-01-01 00:00" --end_time "2024-01-02 00:00"
   
   # Meteo mode only
   python run.py --mode meteo --start_time "2024-01-01 00:00" --end_time "2024-01-02 00:00"
   
-  # Combined mode - filter both sources
-  python run.py --cml_filter_ids "123,456" --meteo_filter_ids "LKCB,LKKV"
+  # Merged mode - filter both sources
+  python run.py --mode merged --cml_filter_ids "123,456" --meteo_filter_ids "LKCB,LKKV"
             """,
         )
 
         parser.add_argument(
             "--mode",
-            choices=["cml", "meteo", "combined"],
+            choices=["cml", "meteo", "combined", "merged"],
             default="combined",
-            help="Data source mode: cml, meteo, or combined (default: combined)",
+            help="Data source mode: cml, meteo, combined, or merged (default: combined)",
         )
         parser.add_argument(
             "--first_run",
@@ -162,7 +178,7 @@ Examples:
             self.logger.info(f"Starting in {args.mode.upper()} mode")
 
             # Handle filter IDs based on mode
-            if args.mode == "combined":
+            if args.mode in ["combined", "merged"]:
                 cml_filter_ids = None
                 meteo_filter_ids = None
 
@@ -179,8 +195,17 @@ Examples:
                     self.logger.info(f"Meteo filter: {meteo_filter_ids}")
 
                 # Process based on arguments
-                if args.first_run:
-                    # Process last week
+                if args.first_run and args.continuous:
+                    # First run + continuous
+                    self.logger.info("Starting with first run, then continuous")
+                    self.calculation_engine.data_processing_loop(
+                        first_run=True,
+                        cml_filter_ids=cml_filter_ids,
+                        meteo_filter_ids=meteo_filter_ids,
+                    )
+
+                elif args.first_run:
+                    # Process last week only
                     end_time = datetime.datetime.now(datetime.timezone.utc).replace(
                         minute=0, second=0, microsecond=0
                     )
@@ -212,6 +237,16 @@ Examples:
                         self.logger.error(f"Invalid time format: {e}")
                         self.logger.error("Use format: YYYY-MM-DD HH:MM")
                         sys.exit(1)
+
+                elif args.continuous:
+                    # Continuous processing only
+                    self.logger.info("Starting continuous processing")
+                    self.calculation_engine.data_processing_loop(
+                        first_run=False,
+                        cml_filter_ids=cml_filter_ids,
+                        meteo_filter_ids=meteo_filter_ids,
+                    )
+
                 else:
                     # Default: Continuous processing
                     self.logger.info("Starting continuous processing (default mode)")

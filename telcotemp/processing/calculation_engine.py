@@ -8,6 +8,7 @@ from telcotemp.storage.influx_writer import InfluxWriter
 from telcotemp.storage.file_writer import FileWriter
 from telcotemp.core.config import AppConfig
 from telcotemp.utils.map_cleanup import MapCleanup
+import pandas as pd
 import threading
 import time
 import math
@@ -565,3 +566,361 @@ class CombinedCalculationEngine:
                 f"until {next_run.strftime('%H:%M')}"
             )
             time.sleep(sleep_seconds)
+
+class MergedCalculationEngine:
+    """
+    Merged calculation engine that combines CML and Meteo data into a single temperature map.
+    Unlike CombinedCalculationEngine which creates two separate maps, this creates one unified map.
+    """
+
+    def __init__(
+        self,
+        config,
+        logger_manager,
+        cml_metadata_provider,
+        meteo_metadata_provider,
+        geo_components,
+    ):
+        """
+        Initialize merged calculation engine.
+
+        :param config: AppConfig instance (with mode="merged")
+        :param logger_manager: LoggerManager instance
+        :param cml_metadata_provider: CMLMetadataProvider
+        :param meteo_metadata_provider: MeteoMetadataProvider
+        :param geo_components: Tuple of (geo_proc, czech_rep, elevation_data, transform_matrix, crs)
+        """
+        self.config = config
+        self.logger = logger_manager.get_logger("backend_logger")
+        self.map_cleanup = MapCleanup(config, self.logger)
+
+        # Unpack geo components
+        (
+            self.geo_proc,
+            self.czech_rep,
+            self.elevation_data,
+            self.transform_matrix,
+            self.crs,
+        ) = geo_components
+
+        # Create separate configs for data sources
+        cml_config = AppConfig(config_dir=config.config_dir, mode="cml")
+        meteo_config = AppConfig(config_dir=config.config_dir, mode="meteo")
+
+        # Store cml_config as instance variable for ML prediction
+        self.cml_config = cml_config
+        
+        # Initialize data sources (not full engines)
+        from telcotemp.data_sources.cml.processor import CMLDataSource
+        from telcotemp.data_sources.meteo.processor import MeteoDataSource
+
+        self.cml_data_source = CMLDataSource(
+            cml_config, self.logger, cml_metadata_provider, geo_components
+        )
+        self.meteo_data_source = MeteoDataSource(
+            meteo_config, self.logger, meteo_metadata_provider
+        )
+
+        # Initialize shared components
+        self.interpolator = SpatialInterpolator(config, self.logger)
+        self.visualizer = MapVisualizer(config, self.logger)
+        self.file_writer = FileWriter(config, self.logger)
+
+        # CML InfluxWriter (optional) - use cml_config instead of config
+        try:
+            influx_write_cfg = cml_config.get_influx_config("write")
+            self.influx_writer = InfluxWriter(cml_config, self.logger)
+        except (KeyError, ValueError):
+            self.influx_writer = None
+            self.logger.info("InfluxWriter disabled for merged mode (no CML write config)")
+
+        self.logger.info("Merged calculation engine initialized (CML + Meteo -> single map)")
+
+    def _merge_dataframes(self, cml_df, meteo_df):
+        """
+        Merge CML and Meteo dataframes into a unified format for interpolation.
+
+        :param cml_df: Prepared CML dataframe with Predicted_Temperature
+        :param meteo_df: Prepared Meteo dataframe with Temperature
+        :return: Merged dataframe with unified columns
+        """
+
+        merged_records = []
+
+        # Process CML data
+        if not cml_df.empty:
+            for _, row in cml_df.iterrows():
+                merged_records.append({
+                    "Longitude": row.get("Longitude"),
+                    "Latitude": row.get("Latitude"),
+                    "X": row.get("X"),
+                    "Y": row.get("Y"),
+                    "Temperature": row.get("Predicted_Temperature"),
+                    "Source": "CML",
+                    "ID": row.get("Link_ID", row.get("IP", "unknown")),
+                })
+
+        # Process Meteo data
+        if not meteo_df.empty:
+            for _, row in meteo_df.iterrows():
+                merged_records.append({
+                    "Longitude": row.get("Longitude"),
+                    "Latitude": row.get("Latitude"),
+                    "X": row.get("X"),
+                    "Y": row.get("Y"),
+                    "Temperature": row.get("Temperature"),
+                    "Source": "Meteo",
+                    "ID": row.get("ID", "unknown"),
+                })
+
+        if not merged_records:
+            return pd.DataFrame()
+
+        merged_df = pd.DataFrame(merged_records)
+
+        # Drop rows with missing coordinates or temperature
+        merged_df = merged_df.dropna(subset=["Longitude", "Latitude", "X", "Y", "Temperature"])
+
+        self.logger.info(
+            f"[MERGED] Combined {len(cml_df)} CML + {len(meteo_df)} Meteo = {len(merged_df)} total points"
+        )
+
+        return merged_df
+
+    def process_time_range(
+        self, start_time, end_time, cml_filter_ids=None, meteo_filter_ids=None
+    ):
+        """
+        Process data for given time range, merging CML and Meteo data into single maps.
+
+        :param start_time: Start datetime
+        :param end_time: End datetime
+        :param cml_filter_ids: Optional list of link_ids for CML
+        :param meteo_filter_ids: Optional list of station_ids for Meteo
+        """
+        self.logger.info(
+            f"[MERGED] Processing time range: {start_time} to {end_time}"
+        )
+
+        current_time = start_time
+
+        while current_time < end_time:
+            self.logger.info(f"[MERGED] Processing {current_time}")
+
+            try:
+                # 1. Fetch data from both sources
+                cml_raw = self.cml_data_source.fetch_data(
+                    current_time, current_time + timedelta(hours=1)
+                )
+                meteo_raw = self.meteo_data_source.fetch_data(
+                    current_time, current_time + timedelta(hours=1)
+                )
+
+                # 2. Prepare data (metadata, coordinates, filtering)
+                cml_df = pd.DataFrame()
+                meteo_df = pd.DataFrame()
+
+                if not cml_raw.empty:
+                    cml_df = self.cml_data_source.prepare_data(cml_raw, cml_filter_ids)
+
+                    # 3. ML Prediction for CML - use cml_config instead of self.config
+                    if self.cml_data_source.supports_ml_prediction() and not cml_df.empty:
+                        ml_cfg = self.cml_config.get_ml()  # Changed from self.config
+                        if ml_cfg:
+                            cml_df = temperature_predict(
+                                cml_df, ml_cfg["scaler_path"], ml_cfg["lstm_path"]
+                            )
+                            self.logger.info("[MERGED] CML ML prediction completed")
+                        else:
+                            self.logger.warning("[MERGED] ML config not found, skipping CML prediction")
+                            cml_df = pd.DataFrame()  # Skip CML if no ML config
+
+                if not meteo_raw.empty:
+                    meteo_df = self.meteo_data_source.prepare_data(meteo_raw, meteo_filter_ids)
+
+                # 4. Merge dataframes
+                merged_df = self._merge_dataframes(cml_df, meteo_df)
+
+                if merged_df.empty:
+                    self.logger.warning(f"[MERGED] No data after merging for {current_time}")
+                    current_time += timedelta(hours=1)
+                    continue
+
+                # 5. Interpolation using merged data
+                grid_x, grid_y, grid_z = self.interpolator.interpolate(
+                    merged_df,
+                    self.czech_rep,
+                    self.geo_proc,
+                    self.elevation_data,
+                    self.transform_matrix,
+                    self.crs,
+                    temp_column="Temperature",
+                )
+
+                # 6. Visualization
+                image_time = current_time.replace(minute=0, second=0, microsecond=0)
+                image_name = f"{image_time.strftime('%Y-%m-%d_%H%M')}.png"
+
+                paths = self.config.get_paths()
+                output_dir = paths.get("merged_dir", paths.get("output_dir", "outputs_web/merged"))
+
+                self.visualizer.plot(
+                    grid_x, grid_y, grid_z, self.czech_rep, image_name, output_dir
+                )
+
+                # 7. Storage
+                if self.influx_writer:
+                    # Write merged data (optional - may need adjustment based on schema)
+                    self.influx_writer.write(merged_df)
+
+                self.file_writer.save_grid(grid_x, grid_y, grid_z, image_name)
+
+                self.logger.info(f"[MERGED] Successfully processed {current_time}")
+
+            except Exception as e:
+                self.logger.exception(f"[MERGED] Error processing {current_time}: {e}")
+
+            current_time += timedelta(hours=1)
+
+    def process_historical_data(
+        self, start_time, end_time, cml_filter_ids=None, meteo_filter_ids=None
+    ):
+        """
+        Process historical data for the given time range.
+        Alias for process_time_range for backward compatibility.
+        """
+        self.logger.info(
+            f"[MERGED] Processing historical data from {start_time} to {end_time}"
+        )
+        self.process_time_range(start_time, end_time, cml_filter_ids, meteo_filter_ids)
+
+    def data_processing_loop(
+        self,
+        first_run=False,
+        start_time=None,
+        end_time=None,
+        cml_filter_ids=None,
+        meteo_filter_ids=None,
+    ):
+        """
+        Main data processing loop for merged mode.
+
+        :param first_run: If True, process last 7 days first
+        :param start_time: Optional start time for specific range
+        :param end_time: Optional end time for specific range
+        :param cml_filter_ids: Optional list of CML link IDs to filter
+        :param meteo_filter_ids: Optional list of Meteo station IDs to filter
+        """
+        import time as time_module
+
+        if first_run:
+            self.logger.info("[MERGED] First run: Processing data for the last week.")
+
+            # Calculate historical time range (7 days back)
+            now = datetime.now(timezone.utc)
+            historical_end_time = now.replace(minute=0, second=0, microsecond=0)
+            historical_start_time = historical_end_time - timedelta(days=7)
+
+            # Process historical data
+            self.process_historical_data(
+                historical_start_time,
+                historical_end_time,
+                cml_filter_ids,
+                meteo_filter_ids,
+            )
+            self.logger.info(
+                f"[MERGED] Historical processing completed at {historical_end_time}"
+            )
+
+            # After historical processing, fill the gap to current safe time
+            now_updated = datetime.now(timezone.utc)
+            safe_start_time = (now_updated - timedelta(minutes=90)).replace(
+                minute=0, second=0, microsecond=0
+            )
+
+            # If there's a gap between historical end and safe time, fill it
+            if historical_end_time < safe_start_time:
+                gap_hours = int(
+                    (safe_start_time - historical_end_time).total_seconds() / 3600
+                )
+                self.logger.info(
+                    f"[MERGED] Filling gap of {gap_hours} hours from "
+                    f"{historical_end_time} to {safe_start_time}"
+                )
+                self.process_time_range(
+                    historical_end_time,
+                    safe_start_time,
+                    cml_filter_ids,
+                    meteo_filter_ids,
+                )
+                self.logger.info(f"[MERGED] Gap filled, now at {safe_start_time}")
+            else:
+                self.logger.info("[MERGED] No gap to fill, ready for continuous mode")
+
+            self.logger.info("[MERGED] Switching to continuous mode.")
+
+        elif start_time and end_time:
+            self.logger.info(
+                f"[MERGED] Processing time range: {start_time} to {end_time}"
+            )
+            self.process_historical_data(
+                start_time, end_time, cml_filter_ids, meteo_filter_ids
+            )
+            return
+
+        # Continuous loop
+        self.logger.info("[MERGED] Starting continuous processing")
+
+        last_processed_time = None
+
+        while True:
+            now = datetime.now(timezone.utc)
+
+            # Run cleanup once per day (at 03:00) if enabled
+            if now.hour == 3 and self.map_cleanup.enabled:
+                self.logger.info("[MERGED] Running daily map cleanup")
+                self.map_cleanup.cleanup_all_outputs()
+
+            # Safe start time = Current time - 90 minutes, rounded down to hour
+            # This ensures both CML and Meteo data are available
+            safe_start_time = (now - timedelta(minutes=90)).replace(
+                minute=0, second=0, microsecond=0
+            )
+
+            if last_processed_time != safe_start_time:
+                self.logger.info(
+                    f"[MERGED] Processing safe time window: "
+                    f"{safe_start_time.strftime('%Y-%m-%d %H:00')}"
+                )
+
+                # Process the hour
+                self.process_time_range(
+                    safe_start_time,
+                    safe_start_time + timedelta(hours=1),
+                    cml_filter_ids,
+                    meteo_filter_ids,
+                )
+                last_processed_time = safe_start_time
+            else:
+                self.logger.info(
+                    f"[MERGED] Window {safe_start_time.strftime('%Y-%m-%d %H:00')} "
+                    f"already processed, waiting for next hour."
+                )
+
+            # Schedule next run for XX:40
+            now = datetime.now(timezone.utc)
+            next_run_minute = 40
+
+            if now.minute < next_run_minute:
+                next_run = now.replace(minute=next_run_minute, second=0, microsecond=0)
+            else:
+                next_run = (now + timedelta(hours=1)).replace(
+                    minute=next_run_minute, second=0, microsecond=0
+                )
+
+            sleep_seconds = (next_run - now).total_seconds()
+            self.logger.info(
+                f"[MERGED] Sleeping {sleep_seconds/60:.1f} minutes "
+                f"until {next_run.strftime('%H:%M')}"
+            )
+            time_module.sleep(sleep_seconds)
