@@ -43,13 +43,13 @@ def main():
     merged_csv = os.path.join(out_dir, "bias_merged.csv")
     df = merge_bias_csvs(bias_dir, merged_csv)
 
-    plot_bias_vs_sun(df, os.path.join(out_dir, "bias_vs_sun_merged.png"))
-    plot_bias_vs_hour(df, os.path.join(out_dir, "bias_vs_hour_merged.png"))
+    plot_bias_vs_sun(df, os.path.join(out_dir, "bias_vs_sun_merged.pdf"))
+    plot_bias_vs_hour(df, os.path.join(out_dir, "bias_vs_hour_merged.pdf"))
 
     print(f"Merged rows: {len(df)}")
     print(f"Wrote: {merged_csv}")
-    print(f"Wrote: {os.path.join(out_dir, 'bias_vs_sun_merged.png')}")
-    print(f"Wrote: {os.path.join(out_dir, 'bias_vs_hour_merged.png')}")
+    print(f"Wrote: {os.path.join(out_dir, 'bias_vs_sun_merged.pdf')}")
+    print(f"Wrote: {os.path.join(out_dir, 'bias_vs_hour_merged.pdf')}")
 
 
 if __name__ == "__main__":

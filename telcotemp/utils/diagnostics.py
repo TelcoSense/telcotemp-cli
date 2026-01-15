@@ -64,11 +64,14 @@ def plot_bias_vs_sun(df_bias: pd.DataFrame, out_path: str) -> None:
     ]
 
     plt.figure()
-    plt.boxplot(groups, labels=["night (sun=0)", "day (sun=1)"])
-    plt.ylabel("bias [°C]  (CML median - meteo median)")
-    plt.title("Bias vs daylight")
+    # plt.boxplot(groups, labels=["night (sun=0)", "day (sun=1)"])
+    # plt.ylabel("bias [°C]  (CML median - meteo median)")
+    # plt.title("Bias vs daylight")
+    plt.boxplot(groups, labels=["noc (sun=0)", "den (sun=1)"])
+    plt.ylabel("bias [°C]  (CML median – meteo median)")
+    plt.title("Bias vs. noc/den")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path)
     plt.close()
 
 
@@ -80,11 +83,14 @@ def plot_bias_vs_hour(df_bias: pd.DataFrame, out_path: str) -> None:
 
     plt.figure()
     plt.boxplot(data, labels=[str(h) for h in hours], showfliers=False)
-    plt.xlabel("Hour")
-    plt.ylabel("bias [°C]  (CML median - meteo median)")
-    plt.title("Bias vs hour")
+    # plt.xlabel("Hour")
+    # plt.ylabel("bias [°C]  (CML median - meteo median)")
+    # plt.title("Bias vs hour")
+    plt.xlabel("Hodina dne")
+    plt.ylabel("bias [°C]  (CML median – meteo median)")
+    plt.title("Bias vs. hodiny")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path)
     plt.close()
 
 

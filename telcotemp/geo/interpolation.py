@@ -171,7 +171,7 @@ class SpatialInterpolator:
         :param temp_column: Name of temperature column (Predicted_Temperature or Temperature_Value)
         :return: Tuple of grid X-coordinates, grid Y-coordinates, and predicted temperature grid.
         """
-        self.logger.info(
+        self.logger.debug(
             "spatial_interpolation start (model=%s, variogram=%s, nlags=%s)",
             self.regression_model_type,
             self.variogram_model,
