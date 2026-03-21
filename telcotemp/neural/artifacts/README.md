@@ -28,5 +28,5 @@ bidirectional = false
 ```
 
 Optional compatibility fallbacks:
-- `prepare_summary.json` can still be used if you prefer reading `technologies` from a file instead of config.
-- `artifact.yaml` or `artifact.json` can still be used, but it is no longer required for the normal telcotemp setup.
+- `prepare_summary.json` can be used to read`technologies` from a file instead of config.
+- `artifact.yaml` or `artifact.json` can be used, but it is no longer required for the normal telcotemp setup.
