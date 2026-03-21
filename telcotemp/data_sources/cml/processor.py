@@ -3,7 +3,6 @@ from .influx_reader import CMLInfluxReader
 from pyproj import Transformer
 import pandas as pd
 import numpy as np
-from rasterio.transform import rowcol
 
 
 class CMLDataSource(DataSource):
@@ -21,6 +20,8 @@ class CMLDataSource(DataSource):
             self.transform_matrix,
             self.crs,
         ) = geo_components
+        self._to_map_crs = Transformer.from_crs("EPSG:4326", self.crs, always_xy=True)
+        self._location = self.config.get_location()
 
     def fetch_data(self, start_time, end_time):
         """Fetch CML data from InfluxDB."""
@@ -43,15 +44,33 @@ class CMLDataSource(DataSource):
         ips = df["IP"].unique().tolist()
         metadata = self.metadata_provider.fetch_metadata(ips)
 
-        # Map metadata to dataframe
-        df["Latitude"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("lat"))
-        df["Longitude"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("lon"))
-        df["Azimuth"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("azimuth"))
-        df["Link_ID"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("link_id"))
-        df["Technology"] = df["IP"].map(
-            lambda ip: metadata.get(ip, {}).get("technology")
+        metadata_rows = [
+            {
+                "IP": ip,
+                "Latitude": values.get("lat"),
+                "Longitude": values.get("lon"),
+                "Azimuth": values.get("azimuth"),
+                "Altitude": values.get("altitude"),
+                "Link_ID": values.get("link_id"),
+                "Technology": values.get("technology"),
+                "Side": values.get("side"),
+            }
+            for ip, values in metadata.items()
+        ]
+        metadata_df = pd.DataFrame.from_records(
+            metadata_rows,
+            columns=[
+                "IP",
+                "Latitude",
+                "Longitude",
+                "Azimuth",
+                "Altitude",
+                "Link_ID",
+                "Technology",
+                "Side",
+            ],
         )
-        df["Side"] = df["IP"].map(lambda ip: metadata.get(ip, {}).get("side"))
+        df = df.merge(metadata_df, on="IP", how="left")
 
         # Drop rows without metadata
         df = df.dropna(subset=["Latitude", "Longitude", "Link_ID"])
@@ -68,9 +87,13 @@ class CMLDataSource(DataSource):
         # Add daylight flag
         from telcotemp.utils.time_utils import is_daylight
 
-        location = self.config.get_location()
         df["sun"] = df["Time"].apply(
-            lambda ts: is_daylight(ts, location["lat"], location["lng"], location["tz"])
+            lambda ts: is_daylight(
+                ts,
+                self._location["lat"],
+                self._location["lng"],
+                self._location["tz"],
+            )
         )
 
         # Add time features
@@ -78,15 +101,14 @@ class CMLDataSource(DataSource):
         df["Day"] = df["Time"].dt.dayofyear
 
         # Transform coordinates to EPSG:3857
-        transformer = Transformer.from_crs("EPSG:4326", self.crs, always_xy=True)
-        xs, ys = transformer.transform(df["Longitude"].values, df["Latitude"].values)
+        xs, ys = self._to_map_crs.transform(
+            df["Longitude"].values, df["Latitude"].values
+        )
         df["X"] = xs
         df["Y"] = ys
 
         # Calculate elevation from DEM for each point
-        # Transform coordinates to raster CRS
-        to_raster = Transformer.from_crs("EPSG:4326", self.crs, always_xy=True)
-        x_raster, y_raster = to_raster.transform(
+        x_raster, y_raster = self._to_map_crs.transform(
             df["Longitude"].to_numpy(), df["Latitude"].to_numpy()
         )
 

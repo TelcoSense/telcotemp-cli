@@ -3,15 +3,6 @@ TelcoTemp -- Temperature Monitoring and Visualization System
 Supports both CML (microwave links), Meteo (weather stations), and Combined modes
 """
 
-import os
-
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-
-import tensorflow as tf
-
-tf.get_logger().setLevel("ERROR")
-
 from telcotemp.core.config import AppConfig
 from telcotemp.core.log import LoggerManager
 from telcotemp.core.initialization import (

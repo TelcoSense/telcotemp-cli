@@ -26,32 +26,9 @@ class CMLMetadataProvider(MetadataProvider):
         if missing:
             placeholders = ",".join([f"'{ip}'" for ip in missing])
 
-            query = text(
-                f"""
-                SELECT
-                    l.ID AS link_id,
-                    l.technology AS technology,
-                    x.ip AS ip,
-                    x.side AS side,
-                    x.azimuth AS azimuth,
-                    s.X_coordinate AS lon,
-                    s.Y_coordinate AS lat
-                FROM cml_metadata.links l
-                JOIN (
-                    SELECT ID, IP_address_A AS ip, 'A' AS side, site_A AS site_id, azimuth_A AS azimuth 
-                    FROM cml_metadata.links
-                    UNION ALL
-                    SELECT ID, IP_address_B AS ip, 'B' AS side, site_B AS site_id, azimuth_B AS azimuth 
-                    FROM cml_metadata.links
-                ) x ON x.ID = l.ID
-                JOIN cml_metadata.sites s ON s.id = x.site_id
-                WHERE x.ip IN ({placeholders})
-            """
-            )
-
             try:
                 with self.engine.connect() as conn:
-                    result = conn.execute(query)
+                    result = conn.execute(self._query_with_measurement_mapping(placeholders))
 
                     for row in result:
                         self._cache[row.ip] = {
@@ -59,6 +36,7 @@ class CMLMetadataProvider(MetadataProvider):
                             "technology": row.technology,
                             "side": row.side,
                             "azimuth": row.azimuth,
+                            "altitude": row.altitude,
                             "lat": row.lat,
                             "lon": row.lon,
                         }
@@ -68,9 +46,85 @@ class CMLMetadataProvider(MetadataProvider):
                     )
 
             except Exception as e:
-                self.logger.error(f"Error fetching metadata: {e}")
+                self.logger.warning(
+                    "Mapped technology metadata query failed, falling back to raw technology values: %s",
+                    e,
+                )
+                try:
+                    with self.engine.connect() as conn:
+                        result = conn.execute(self._fallback_query(placeholders))
+
+                        for row in result:
+                            self._cache[row.ip] = {
+                                "link_id": row.link_id,
+                                "technology": row.technology,
+                                "side": row.side,
+                                "azimuth": row.azimuth,
+                                "altitude": row.altitude,
+                                "lat": row.lat,
+                                "lon": row.lon,
+                            }
+                except Exception as fallback_error:
+                    self.logger.error(f"Error fetching metadata: {fallback_error}")
 
         elapsed = time.perf_counter() - t0
         self.logger.debug(f"Metadata fetch completed in {elapsed:.3f}s")
 
         return self._cache
+
+    def _query_with_measurement_mapping(self, placeholders):
+        return text(
+            f"""
+                SELECT
+                    l.ID AS link_id,
+                    COALESCE(
+                        m.measurement,
+                        st.influx_measurement,
+                        CAST(l.technology AS CHAR)
+                    ) AS technology,
+                    x.ip AS ip,
+                    x.side AS side,
+                    x.azimuth AS azimuth,
+                    s.altitude AS altitude,
+                    s.X_coordinate AS lon,
+                    s.Y_coordinate AS lat
+                FROM cml_metadata.links l
+                JOIN (
+                    SELECT ID, IP_address_A AS ip, 'A' AS side, site_A AS site_id, azimuth_A AS azimuth
+                    FROM cml_metadata.links
+                    UNION ALL
+                    SELECT ID, IP_address_B AS ip, 'B' AS side, site_B AS site_id, azimuth_B AS azimuth
+                    FROM cml_metadata.links
+                ) x ON x.ID = l.ID
+                JOIN cml_metadata.sites s ON s.id = x.site_id
+                LEFT JOIN cml_metadata.technologies t ON t.ID = l.technology
+                LEFT JOIN cml_metadata.technologies_influx_mapping m ON t.influx_mapping_ID = m.ID
+                LEFT JOIN cml_metadata.show_technologies st ON st.ID = l.technology
+                WHERE x.ip IN ({placeholders})
+            """
+        )
+
+    def _fallback_query(self, placeholders):
+        return text(
+            f"""
+                SELECT
+                    l.ID AS link_id,
+                    l.technology AS technology,
+                    x.ip AS ip,
+                    x.side AS side,
+                    x.azimuth AS azimuth,
+                    s.altitude AS altitude,
+                    s.X_coordinate AS lon,
+                    s.Y_coordinate AS lat
+                FROM cml_metadata.links l
+                JOIN (
+                    SELECT ID, IP_address_A AS ip, 'A' AS side, site_A AS site_id, azimuth_A AS azimuth
+                    FROM cml_metadata.links
+                    UNION ALL
+                    SELECT ID, IP_address_B AS ip, 'B' AS side, site_B AS site_id, azimuth_B AS azimuth
+                    FROM cml_metadata.links
+                ) x ON x.ID = l.ID
+                JOIN cml_metadata.sites s ON s.id = x.site_id
+                WHERE x.ip IN ({placeholders})
+            """
+        )

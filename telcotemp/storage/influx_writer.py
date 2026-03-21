@@ -71,18 +71,22 @@ class InfluxWriter:
             return
 
         points = []
-        for _, row in df.iterrows():
-            cml_id_tag = _id_to_tag(row["Link_ID"])
+        for row in df.itertuples(index=False):
+            cml_id_tag = _id_to_tag(row.Link_ID)
             if not cml_id_tag:
                 continue  # skip rows with missing ID
             point = (
                 Point(self.measurement)
                 .tag(self.tag_cml_id, cml_id_tag)
-                .tag(self.tag_side, str(row["Side"]))
-                .field(self.field_temperature, float(row["Predicted_Temperature"]))
-                .time(row["Time"].to_pydatetime())
+                .tag(self.tag_side, str(row.Side))
+                .field(self.field_temperature, float(row.Predicted_Temperature))
+                .time(row.Time.to_pydatetime())
             )
             points.append(point)
+
+        if not points:
+            self.logger.warning("No valid Influx points were generated from the dataframe")
+            return
 
         try:
             with InfluxDBClient(url=self.url, token=self.token, org=self.org) as client:

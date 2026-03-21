@@ -1,4 +1,4 @@
-﻿name: telcotemp_env
+name: telcotemp_env
 channels:
   - defaults
   - https://repo.anaconda.com/pkgs/main
@@ -69,24 +69,17 @@ dependencies:
       - jaraco-context==6.0.2
       - jaraco-functools==4.4.0
       - jinja2==3.1.6
-      - joblib==1.5.2
-      - keras==3.11.3
       - keyring==25.7.0
       - kiwisolver==1.4.9
-      - libclang==18.1.1
       - markdown==3.9
       - markdown-it-py==4.0.0
       - markupsafe==3.0.2
       - matplotlib==3.10.6
       - mdurl==0.1.2
-      - ml-dtypes==0.4.1
       - more-itertools==10.8.0
       - msgpack==1.1.2
       - mysqlclient==2.2.7
-      - namex==0.1.0
       - numpy==2.0.2
-      - opt-einsum==3.4.0
-      - optree==0.17.0
       - packaging==25.0
       - pandas==2.3.2
       - pillow==11.3.0
@@ -120,14 +113,10 @@ dependencies:
       - six==1.17.0
       - smmap==5.0.2
       - sqlalchemy==1.4.39
-      - tensorboard==2.18.0
-      - tensorboard-data-server==0.7.2
-      - tensorflow-intel==2.18.0
-      - tensorflow-io-gcs-filesystem==0.31.0
-      - termcolor==3.1.0
       - threadpoolctl==3.6.0
       - tomli==2.3.0
       - tomlkit==0.13.3
+      - torch==2.8.0
       - trove-classifiers==2025.12.1.14
       - typing-extensions==4.15.0
       - typing-inspection==0.4.2

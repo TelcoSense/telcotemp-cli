@@ -45,8 +45,44 @@ scale_mode = static
 
 ; MACHINE LEARNING CONFIGURATION (CML mode)
 [ml]
-lstm_path = telcotemp/neural/best_lstm_new.keras
-scaler_path = telcotemp/neural/scaler_new.joblib
+; Preferred self-contained setup:
+; Put a model artifact inside telcotemp/neural/artifacts/<name>/
+; with best.pt and scaler_bundle.json.
+artifact_dir = telcotemp/neural/artifacts/current
+; Default filenames inside artifact_dir:
+checkpoint_path = best.pt
+scaler_bundle_path = scaler_bundle.json
+; Technologies are expected from config to keep runtime self-contained.
+technologies = ["1s10", "ceragon_ip_20", "summit", "summit_bt"]
+; Optional fallback if you want to read technologies from a file instead:
+; prepare_summary_path = prepare_summary.json
+; Window settings are provided here in config.
+seq_len = 36
+sample_minutes = 10
+; LSTM model parameters are provided here in config.
+model_type = lstm
+hidden_size = 64
+num_layers = 2
+dropout = 0.2
+technology_embed_dim = 8
+mlp_hidden_size = 64
+head_activation = gelu
+use_layer_norm = false
+bidirectional = false
+; Legacy fallback if you still want to point to telcotemp_nn config directly:
+; nn_config_path = ../TelcoTemp_NN/configs/lstm_temp.yaml
+; model_name = lstm_gelu
+; Sequence grouping should match how cml_id was defined during training.
+; For the current dataset_preparation pipeline, cml_id = Link_ID + "_" + Side.
+; Valid values are any runtime column such as IP, Link_ID, cml_id, or Link_ID_Side.
+group_col = cml_id
+device = cpu
+; Optional batching for larger historical runs.
+inference_batch_size = 2048
+; Merge nearby CML endpoints into one roof-level point before interpolation.
+merge_roofs = true
+roof_merge_distance_m = 15
+bias_offset = 0.0
 
 ; GRID COMPUTATION CONFIGURATION
 [grid]
@@ -82,7 +118,7 @@ org =
 ; CML MODE CONFIGURATION
 [influx_read]
 bucket = realtime_cbl
-measurements = 1s10, summit, summit_bt
+measurements = 1s10, ceragon_ip_20, summit, summit_bt
 fields = Teplota, PrijimanaUroven
 tag_device = agent_host
 field_temperature = Teplota

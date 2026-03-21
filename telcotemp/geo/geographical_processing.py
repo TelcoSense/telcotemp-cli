@@ -1,5 +1,6 @@
 import geopandas as gpd
 from shapely.geometry import Polygon, Point
+from shapely import contains_xy
 import numpy as np
 import json
 import rasterio
@@ -21,6 +22,15 @@ class GeographicalProcessing:
 
     def create_mask(self, czech_rep, grid_x, grid_y):
         """Create mask for grid points inside Czech Republic."""
+        geom = (
+            czech_rep.union_all()
+            if hasattr(czech_rep, "union_all")
+            else czech_rep.unary_union
+        )
+        return contains_xy(geom, grid_x, grid_y)
+
+    def create_mask_slow(self, czech_rep, grid_x, grid_y):
+        """Fallback implementation kept for debugging/reference."""
         mask = np.zeros_like(grid_x, dtype=bool)
         for i in range(grid_x.shape[0]):
             for j in range(grid_x.shape[1]):

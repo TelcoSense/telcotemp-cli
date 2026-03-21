@@ -1,3 +1,4 @@
+import ast
 import configparser
 import os
 
@@ -98,9 +99,43 @@ class AppConfig:
             return None
 
         ml = self.config["ml"]
+        technologies_str = ml.get("technologies", "[]")
+        try:
+            technologies = (
+                [str(item) for item in ast.literal_eval(technologies_str)]
+                if technologies_str.strip()
+                else []
+            )
+        except Exception:
+            technologies = []
+
         return {
-            "lstm_path": ml.get("lstm_path"),
-            "scaler_path": ml.get("scaler_path"),
+            "artifact_dir": ml.get("artifact_dir"),
+            "artifact_config_path": ml.get("artifact_config_path"),
+            "nn_config_path": ml.get("nn_config_path"),
+            "model_name": ml.get("model_name", "lstm_gelu"),
+            "checkpoint_path": ml.get("checkpoint_path"),
+            "prepare_summary_path": ml.get("prepare_summary_path"),
+            "scaler_bundle_path": ml.get("scaler_bundle_path"),
+            "technologies": technologies,
+            "seq_len": ml.get("seq_len"),
+            "sample_minutes": ml.get("sample_minutes"),
+            "model_type": ml.get("model_type", "lstm"),
+            "hidden_size": ml.get("hidden_size"),
+            "num_layers": ml.get("num_layers"),
+            "dropout": ml.get("dropout"),
+            "technology_embed_dim": ml.get("technology_embed_dim"),
+            "mlp_hidden_size": ml.get("mlp_hidden_size"),
+            "head_activation": ml.get("head_activation"),
+            "use_layer_norm": ml.get("use_layer_norm"),
+            "bidirectional": ml.get("bidirectional"),
+            "group_col": ml.get("group_col", "IP"),
+            "device": ml.get("device", "cpu"),
+            "inference_batch_size": ml.get("inference_batch_size"),
+            "merge_roofs": ml.getboolean("merge_roofs", fallback=True),
+            "roof_merge_distance_m": ml.getfloat(
+                "roof_merge_distance_m", fallback=15.0
+            ),
             "bias_offset": float(ml.get("bias_offset", "0.0")),
         }
 

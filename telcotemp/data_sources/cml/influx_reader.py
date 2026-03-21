@@ -28,47 +28,42 @@ class CMLInfluxReader(InfluxReader):
 
         try:
             with InfluxDBClient(url=self.url, token=self.token, org=self.org) as client:
-                result = client.query_api().query(org=self.org, query=query)
+                result = client.query_api().query_data_frame(
+                    org=self.org, query=query
+                )
         except Exception as e:
             self.logger.error(f"Error fetching from InfluxDB: {e}")
             return pd.DataFrame()
 
-        # Process results
-        records = []
-        for table in result:
-            for record in table.records:
-                records.append(
-                    {
-                        "Time": record.get_time(),
-                        "Device": record.values.get("agent_host"),
-                        "Measurement": record.get_field(),
-                        "Value": record.get_value(),
-                    }
-                )
-
-        if not records:
+        frames = result if isinstance(result, list) else [result]
+        frames = [frame for frame in frames if isinstance(frame, pd.DataFrame) and not frame.empty]
+        if not frames:
             self.logger.warning("No data returned from InfluxDB")
             return pd.DataFrame()
 
-        df = pd.DataFrame(records)
+        df = pd.concat(frames, ignore_index=True)
+        drop_columns = [
+            column
+            for column in ["result", "table", "_start", "_stop", "_measurement"]
+            if column in df.columns
+        ]
+        if drop_columns:
+            df = df.drop(columns=drop_columns)
 
-        # Pivot to get Temperature_MW and Signal columns
-        df_pivot = df.pivot_table(
-            index=["Time", "Device"], columns="Measurement", values="Value"
-        ).reset_index()
-
-        df_pivot["Time"] = pd.to_datetime(df_pivot["Time"], utc=True)
-        df_pivot.rename(
+        df.rename(
             columns={
-                "Device": "IP",
+                "_time": "Time",
+                self.tag_device: "IP",
                 "Teplota": "Temperature_MW",
                 "PrijimanaUroven": "Signal",
             },
             inplace=True,
         )
+        df["Time"] = pd.to_datetime(df["Time"], utc=True)
+        df = df.sort_values(["Time", "IP"]).reset_index(drop=True)
 
-        self.logger.info(f"Fetched {len(df_pivot)} CML records")
-        return df_pivot
+        self.logger.info(f"Fetched {len(df)} CML records")
+        return df
 
     def _build_query(self, start_time, end_time):
         """Build Flux query."""
@@ -85,6 +80,12 @@ class CMLInfluxReader(InfluxReader):
                   |> range(start: {start_iso}, stop: {end_iso})
                   |> filter(fn: (r) => {measurements})
                   |> filter(fn: (r) => {fields})
-                  |> aggregateWindow(every: {self.window}, fn: mean)
-                  |> group(columns: ["_measurement", "_field", "{self.tag_device}"])
+                  |> aggregateWindow(every: {self.window}, fn: mean, createEmpty: false)
+                  |> keep(columns: ["_time", "_field", "_value", "{self.tag_device}"])
+                  |> group(columns: ["{self.tag_device}"])
+                  |> pivot(
+                    rowKey: ["_time", "{self.tag_device}"],
+                    columnKey: ["_field"],
+                    valueColumn: "_value"
+                  )
             """

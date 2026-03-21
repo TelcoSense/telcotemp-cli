@@ -1,6 +1,15 @@
 from astral import LocationInfo
 from astral.sun import sun
+from functools import lru_cache
 import pytz
+
+
+@lru_cache(maxsize=4096)
+def _get_daylight_bounds(date_key, lat, lng, tz_str):
+    location = LocationInfo(latitude=lat, longitude=lng)
+    tz = pytz.timezone(tz_str)
+    s = sun(location.observer, date=date_key, tzinfo=tz)
+    return s["sunrise"], s["sunset"]
 
 
 def is_daylight(timestamp, lat, lng, tz_str):
@@ -16,7 +25,6 @@ def is_daylight(timestamp, lat, lng, tz_str):
     Returns:
         1 if daylight, 0 if night
     """
-    location = LocationInfo(latitude=lat, longitude=lng)
     tz = pytz.timezone(tz_str)
     
     # Ensure timestamp is timezone-aware
@@ -25,9 +33,6 @@ def is_daylight(timestamp, lat, lng, tz_str):
     else:
         timestamp = timestamp.astimezone(tz)
     
-    # Get sunrise and sunset for the day
-    s = sun(location.observer, date=timestamp.date(), tzinfo=tz)
-    sunrise = s["sunrise"]
-    sunset = s["sunset"]
+    sunrise, sunset = _get_daylight_bounds(timestamp.date(), lat, lng, tz_str)
     
     return 1 if sunrise <= timestamp <= sunset else 0

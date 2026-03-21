@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from telcotemp.data_sources.cml.processor import CMLDataSource
 from telcotemp.data_sources.meteo.processor import MeteoDataSource
-from telcotemp.processing.ml_modeling import temperature_predict
+from telcotemp.processing.ml_modeling import (
+    get_ml_prediction_lookback,
+    temperature_predict,
+)
 from telcotemp.geo.interpolation import SpatialInterpolator
 from telcotemp.visualization.map_visualizer import MapVisualizer
 from telcotemp.storage.influx_writer import InfluxWriter
@@ -63,10 +66,87 @@ class CalculationEngine:
         self.interpolator = SpatialInterpolator(config, self.logger)
         self.visualizer = MapVisualizer(config, self.logger)
         self.file_writer = FileWriter(config, self.logger)
+        self.ml_cfg = (
+            self.config.get_ml()
+            if self.mode == "cml" and self.data_source.supports_ml_prediction()
+            else None
+        )
+        self.ml_lookback = (
+            get_ml_prediction_lookback(self.ml_cfg) if self.ml_cfg else timedelta(0)
+        )
+        self._cml_buffer = pd.DataFrame()
+        self._cml_buffer_start = None
+        self._cml_buffer_end = None
+        self._cml_buffer_filter_key = None
 
     # ---------------------------------------------------------------------
     # HELPERS
     # ---------------------------------------------------------------------
+
+    def _filter_key(self, filter_ids):
+        if not filter_ids:
+            return None
+        return tuple(sorted(str(fid) for fid in filter_ids))
+
+    def _reset_cml_buffer(self):
+        self._cml_buffer = pd.DataFrame()
+        self._cml_buffer_start = None
+        self._cml_buffer_end = None
+        self._cml_buffer_filter_key = None
+
+    def _get_prepared_cml_window(self, start_time, end_time, filter_ids=None):
+        window_start = start_time - self.ml_lookback
+        window_end = end_time
+        filter_key = self._filter_key(filter_ids)
+
+        needs_reset = (
+            self._cml_buffer_start is None
+            or self._cml_buffer_end is None
+            or filter_key != self._cml_buffer_filter_key
+            or window_start < self._cml_buffer_start
+            or window_end < self._cml_buffer_end
+        )
+        if needs_reset:
+            self.logger.debug(
+                "[%s] Resetting CML history buffer for %s -> %s",
+                self.mode.upper(),
+                window_start,
+                window_end,
+            )
+            raw_df = self.data_source.fetch_data(window_start, window_end)
+            prepared = self.data_source.prepare_data(raw_df, filter_ids)
+            if prepared.empty:
+                self._reset_cml_buffer()
+                return prepared
+
+            self._cml_buffer = (
+                prepared.sort_values(["Time", "IP"])
+                .drop_duplicates(subset=["Time", "IP"], keep="last")
+                .reset_index(drop=True)
+            )
+        else:
+            fetch_start = max(self._cml_buffer_end, window_start)
+            if fetch_start < window_end:
+                raw_df = self.data_source.fetch_data(fetch_start, window_end)
+                if not raw_df.empty:
+                    prepared = self.data_source.prepare_data(raw_df, filter_ids)
+                    if not prepared.empty:
+                        self._cml_buffer = (
+                            pd.concat([self._cml_buffer, prepared], ignore_index=True)
+                            .sort_values(["Time", "IP"])
+                            .drop_duplicates(subset=["Time", "IP"], keep="last")
+                            .reset_index(drop=True)
+                        )
+
+        if not self._cml_buffer.empty:
+            self._cml_buffer = self._cml_buffer[
+                self._cml_buffer["Time"] >= window_start
+            ].reset_index(drop=True)
+
+        self._cml_buffer_start = window_start
+        self._cml_buffer_end = window_end
+        self._cml_buffer_filter_key = filter_key
+        return self._cml_buffer.copy()
 
     def _dedupe_points_for_kriging(self, df, temp_column: str):
         """Reduce duplicate/near-duplicate measurement locations before kriging.
@@ -126,6 +206,72 @@ class CalculationEngine:
         df2 = df2[np.isfinite(df2[temp_column].to_numpy(dtype=float))]
         return df2
 
+    def _merge_cml_roofs_for_interpolation(self, df, temp_column: str):
+        """Merge nearby CML endpoints into roof-level points before interpolation."""
+        if self.mode != "cml" or df is None or df.empty:
+            return df
+
+        ml_cfg = self.ml_cfg or {}
+        if not ml_cfg.get("merge_roofs", True):
+            return df
+
+        merge_distance_m = float(ml_cfg.get("roof_merge_distance_m", 15.0) or 0.0)
+        if merge_distance_m <= 0:
+            return df
+
+        if temp_column not in df.columns:
+            raise ValueError(
+                f"Missing temperature column '{temp_column}' for roof merge."
+            )
+
+        work = df.copy()
+        work[temp_column] = pd.to_numeric(work[temp_column], errors="coerce")
+
+        if "X" not in work.columns or "Y" not in work.columns:
+            if {"Longitude", "Latitude"}.issubset(work.columns):
+                xs, ys = self.data_source._to_map_crs.transform(
+                    work["Longitude"].to_numpy(), work["Latitude"].to_numpy()
+                )
+                work["X"] = xs
+                work["Y"] = ys
+            else:
+                return work
+
+        valid = (
+            pd.to_numeric(work["X"], errors="coerce").notna()
+            & pd.to_numeric(work["Y"], errors="coerce").notna()
+            & work[temp_column].notna()
+        )
+        work = work.loc[valid].copy()
+        if len(work) < 2:
+            return work
+
+        from sklearn.cluster import DBSCAN
+
+        coords = work[["X", "Y"]].to_numpy(dtype=float)
+        cluster_ids = DBSCAN(eps=merge_distance_m, min_samples=1).fit_predict(coords)
+        work["_roof_cluster"] = cluster_ids
+
+        agg = {
+            temp_column: "median",
+            "Longitude": "median",
+            "Latitude": "median",
+            "X": "median",
+            "Y": "median",
+        }
+        if "Elevation" in work.columns:
+            agg["Elevation"] = "median"
+
+        merged = work.groupby("_roof_cluster", as_index=False).agg(agg)
+        self.logger.debug(
+            "[%s] Roof merge reduced interpolation points from %d to %d (eps=%.1fm)",
+            self.mode.upper(),
+            len(work),
+            len(merged),
+            merge_distance_m,
+        )
+        return merged
+
     def _interpolate_with_fallback(self, df, temp_column: str):
         """Run regression kriging; fall back to regression-only surface on numerical failure."""
         try:
@@ -153,12 +299,16 @@ class CalculationEngine:
             )
 
             rep = self.czech_rep
-            bounds = rep.total_bounds
-            grid_x, grid_y = np.mgrid[
-                bounds[0] : bounds[2] : complex(self.interpolator.grid_x_points),
-                bounds[1] : bounds[3] : complex(self.interpolator.grid_y_points),
-            ]
-            mask = self.geo_proc.create_mask(rep, grid_x, grid_y)
+            grid_ctx = self.interpolator.get_prediction_grid_context(
+                rep,
+                self.geo_proc,
+                self.elevation_data,
+                self.transform_matrix,
+                self.crs,
+            )
+            grid_x = grid_ctx["grid_x"]
+            grid_y = grid_ctx["grid_y"]
+            mask = grid_ctx["mask"]
 
             valid = (
                 df["Longitude"].notna()
@@ -182,15 +332,9 @@ class CalculationEngine:
             model = self.interpolator._get_regression_model()
             model.fit(X_train, temp)
 
-            X_pred, _coords_pred = self.interpolator._prepare_prediction_grid(
-                grid_x,
-                grid_y,
-                self.elevation_data,
-                self.transform_matrix,
-                self.crs,
-                getattr(rep, "crs", None) or "EPSG:4326",
-                mean_elev,
-            )
+            X_pred = np.nan_to_num(
+                grid_ctx["grid_elev_template"], nan=mean_elev
+            ).reshape(-1, 1)
             grid_pred = model.predict(X_pred).reshape(grid_x.shape)
             grid_pred = np.where(mask.reshape(grid_x.shape), grid_pred, np.nan)
             return grid_x, grid_y, grid_pred
@@ -203,19 +347,21 @@ class CalculationEngine:
 
             try:
                 # 1. Fetch data
-                df = self.data_source.fetch_data(
-                    current_time, current_time + timedelta(hours=1)
-                )
-
-                if df.empty:
-                    self.logger.warning(
-                        f"[{self.mode.upper()}] No data for {current_time}"
+                fetch_end = current_time + timedelta(hours=1)
+                ml_cfg = self.ml_cfg
+                if self.data_source.supports_ml_prediction() and ml_cfg:
+                    df = self._get_prepared_cml_window(
+                        current_time, fetch_end, filter_ids
                     )
-                    current_time += timedelta(hours=1)
-                    continue
-
-                # 2. Prepare data (metadata, coordinates, filtering)
-                df = self.data_source.prepare_data(df, filter_ids)
+                else:
+                    df = self.data_source.fetch_data(current_time, fetch_end)
+                    if df.empty:
+                        self.logger.warning(
+                            f"[{self.mode.upper()}] No data for {current_time}"
+                        )
+                        current_time += timedelta(hours=1)
+                        continue
+                    df = self.data_source.prepare_data(df, filter_ids)
 
                 if df.empty:
                     self.logger.warning(
@@ -226,17 +372,25 @@ class CalculationEngine:
 
                 # 3. ML Prediction (only for CML)
                 if self.data_source.supports_ml_prediction():
-                    ml_cfg = self.config.get_ml()
                     if ml_cfg:
+                        prepared_rows = len(df)
                         df = temperature_predict(
                             df,
-                            ml_cfg["scaler_path"],
-                            ml_cfg["lstm_path"],
-                            ml_cfg["bias_offset"],
+                            ml_config=ml_cfg,
+                            prediction_start=current_time,
+                            prediction_end=current_time + timedelta(hours=1),
                         )
                         self.logger.info(
-                            f"[{self.mode.upper()}] ML prediction completed"
+                            "[%s] ML prediction completed: prepared_rows=%d, predicted_rows=%d",
+                            self.mode.upper(),
+                            prepared_rows,
+                            len(df),
                         )
+                        if df.empty:
+                            self.logger.warning(
+                                "[%s] ML prediction returned no rows. Check [ml] technologies, seq_len/sample_minutes, and artifact compatibility.",
+                                self.mode.upper(),
+                            )
                     else:
                         self.logger.warning(
                             f"[{self.mode.upper()}] ML config not found, skipping prediction"
@@ -247,8 +401,16 @@ class CalculationEngine:
                 # 4. Interpolation
                 temp_column = self.data_source.get_temperature_column()
 
+                df_interp_source = df
+                if self.mode == "cml" and self.data_source.supports_ml_prediction():
+                    df_interp_source = self._merge_cml_roofs_for_interpolation(
+                        df, temp_column
+                    )
+
                 # 5. Deduplication
-                df_interp = self._dedupe_points_for_kriging(df, temp_column)
+                df_interp = self._dedupe_points_for_kriging(
+                    df_interp_source, temp_column
+                )
 
                 if df_interp.empty or len(df_interp) < 3:
                     self.logger.warning(
@@ -261,9 +423,10 @@ class CalculationEngine:
                     continue
 
                 self.logger.debug(
-                    "[%s] Interp points: raw=%d, unique_xy=%d",
+                    "[%s] Interp points: raw=%d, roof_merged=%d, unique_xy=%d",
                     self.mode.upper(),
                     len(df),
+                    len(df_interp_source),
                     len(df_interp),
                 )
 

@@ -16,6 +16,9 @@ class MapVisualizer:
         self.vis = config.get_visualization()
         self.paths = config.get_paths()
         self.scale_mode = self.vis.get("scale_mode", "dynamic")
+        self._default_colormap_cache = self._default_colormap()
+        self._dynamic_scale_cache = {}
+        self._static_scale_cache = None
 
     def plot(
         self,
@@ -85,24 +88,27 @@ class MapVisualizer:
 
     def _get_dynamic_scale(self, grid_z):
         """
-        Returns dynamic color scale based on data median (original behavior).
+        Returns dynamic color scale based on data median.
 
         :param grid_z: Temperature grid data
         :return: (colormap, vmin, vmax, colormap_info)
         """
         n_levels = self.vis["n_levels"]
-        colormap = self.vis["colormap"] or self._default_colormap()
+        colormap = self.vis["colormap"] or self._default_colormap_cache
         median_offset = self.vis.get("median_offset", 2)
-
-        cmap = mcolors.LinearSegmentedColormap.from_list(
-            "custom_colormap", colormap, N=n_levels
-        )
+        cache_key = (tuple(tuple(item) for item in colormap), n_levels)
+        if cache_key not in self._dynamic_scale_cache:
+            self._dynamic_scale_cache[cache_key] = (
+                mcolors.LinearSegmentedColormap.from_list(
+                    "custom_colormap", colormap, N=n_levels
+                ),
+                [{"level": level, "color": color} for level, color in colormap],
+            )
+        cmap, colormap_info = self._dynamic_scale_cache[cache_key]
 
         temperature_median = np.nanmedian(grid_z) - median_offset
-        vmin = int(temperature_median) - 7
-        vmax = int(temperature_median) + 7
-
-        colormap_info = [{"level": level, "color": color} for level, color in colormap]
+        vmin = int(temperature_median) - 13
+        vmax = int(temperature_median) + 13
 
         return cmap, vmin, vmax, colormap_info
 
@@ -112,23 +118,26 @@ class MapVisualizer:
 
         :return: (colormap, vmin, vmax, colormap_info)
         """
-        chmu_scale = self._static_colormap()
-        temps, colors = zip(*chmu_scale)
-        vmin = temps[0]
-        vmax = temps[-1]
+        if self._static_scale_cache is None:
+            chmu_scale = self._static_colormap()
+            temps, _ = zip(*chmu_scale)
+            vmin = temps[0]
+            vmax = temps[-1]
 
-        # Normalize temperature positions to [0, 1] range
-        normalized_scale = [
-            ((t - vmin) / (vmax - vmin), color) for t, color in chmu_scale
-        ]
+            # Normalize temperature positions to [0, 1] range
+            normalized_scale = [
+                ((t - vmin) / (vmax - vmin), color) for t, color in chmu_scale
+            ]
 
-        cmap = mcolors.LinearSegmentedColormap.from_list(
-            "chmu_colormap", normalized_scale, N=256
-        )
+            cmap = mcolors.LinearSegmentedColormap.from_list(
+                "chmu_colormap", normalized_scale, N=256
+            )
+            colormap_info = [
+                {"level": temp, "color": color} for temp, color in chmu_scale
+            ]
+            self._static_scale_cache = (cmap, vmin, vmax, colormap_info)
 
-        colormap_info = [{"level": temp, "color": color} for temp, color in chmu_scale]
-
-        return cmap, vmin, vmax, colormap_info
+        return self._static_scale_cache
 
     def map_plotting(
         self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False
@@ -140,22 +149,52 @@ class MapVisualizer:
         """
         Returns the default color scale.
         """
+        # return [
+        #     (0, "#4E00A6"),
+        #     (1 / 14, "#3600D0"),
+        #     (2 / 14, "#1107F4"),
+        #     (3 / 14, "#0032F7"),
+        #     (4 / 14, "#0467FF"),
+        #     (5 / 14, "#04A3FF"),
+        #     (6 / 14, "#04D27F"),
+        #     (7 / 14, "#1BEC38"),
+        #     (8 / 14, "#63FF00"),
+        #     (9 / 14, "#F4FB0D"),
+        #     (10 / 14, "#FBE316"),
+        #     (11 / 14, "#F7C41B"),
+        #     (12 / 14, "#FC871D"),
+        #     (13 / 14, "#DB4F08"),
+        #     (1, "#A00000"),
+        # ]
+
         return [
-            (0, "#4E00A6"),
-            (1 / 14, "#3600D0"),
-            (2 / 14, "#1107F4"),
-            (3 / 14, "#0032F7"),
-            (4 / 14, "#0467FF"),
-            (5 / 14, "#04A3FF"),
-            (6 / 14, "#04D27F"),
-            (7 / 14, "#1BEC38"),
-            (8 / 14, "#63FF00"),
-            (9 / 14, "#F4FB0D"),
-            (10 / 14, "#FBE316"),
-            (11 / 14, "#F7C41B"),
-            (12 / 14, "#FC871D"),
-            (13 / 14, "#DB4F08"),
-            (1, "#A00000"),
+            (0, "#a301e3"),
+            (1 / 26, "#8100e8"),
+            (2 / 26, "#6101e7"),
+            (3 / 26, "#4001e4"),
+            (4 / 26, "#0525e4"),
+            (5 / 26, "#0446ea"),
+            (6 / 26, "#0367e7"),
+            (7 / 26, "#0788e7"),
+            (8 / 26, "#07a9e8"),
+            (9 / 26, "#04cbe8"),
+            (10 / 26, "#08e7e3"),
+            (11 / 26, "#07e9c4"),
+            (12 / 26, "#04eaa2"),
+            (13 / 26, "#0ae964"),
+            (14 / 26, "#0ae91d"),
+            (15 / 26, "#6eec0e"),
+            (16 / 26, "#b0ec0c"),
+            (17 / 26, "#ceec11"),
+            (18 / 26, "#ebe80e"),
+            (19 / 26, "#ebc90d"),
+            (20 / 26, "#eca912"),
+            (21 / 26, "#ed8b11"),
+            (22 / 26, "#ed6b13"),
+            (23 / 26, "#f04b15"),
+            (24 / 26, "#f22c0f"),
+            (25 / 26, "#f01438"),
+            (1, "#FF0000"),
         ]
 
     def _static_colormap(self):

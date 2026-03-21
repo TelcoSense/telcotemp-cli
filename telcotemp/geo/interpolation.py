@@ -35,6 +35,8 @@ class SpatialInterpolator:
         """
         self.logger = logger
         self._load_config(config)
+        self._transformer_cache = {}
+        self._grid_context_cache = {}
 
     def _load_config(self, config):
         """
@@ -69,6 +71,14 @@ class SpatialInterpolator:
                 f"Unknown regression model type: {self.regression_model_type}"
             )
 
+    def _get_transformer(self, src_crs, dst_crs):
+        key = (str(src_crs), str(dst_crs))
+        if key not in self._transformer_cache:
+            self._transformer_cache[key] = Transformer.from_crs(
+                src_crs, dst_crs, always_xy=True
+            )
+        return self._transformer_cache[key]
+
     def _prepare_training_data(
         self, df, elevation_data, transform_matrix, crs, temp_column
     ):
@@ -86,7 +96,7 @@ class SpatialInterpolator:
         lat = df["Latitude"].values
         temp = df[temp_column].values
 
-        to_raster = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+        to_raster = self._get_transformer("EPSG:4326", crs)
         x_pts_raster, y_pts_raster = to_raster.transform(lon, lat)
 
         df2 = df[[temp_column]].copy()
@@ -135,7 +145,7 @@ class SpatialInterpolator:
         :param fallback: Mean elevation to fill missing data in the grid.
         :return: Tuple of elevation data and coordinates for the prediction grid.
         """
-        to_raster = Transformer.from_crs(rep_crs, crs, always_xy=True)
+        to_raster = self._get_transformer(rep_crs, crs)
         grid_x_flat = grid_x.ravel()
         grid_y_flat = grid_y.ravel()
         grid_x_raster, grid_y_raster = to_raster.transform(grid_x_flat, grid_y_flat)
@@ -148,6 +158,50 @@ class SpatialInterpolator:
         grid_elev = np.nan_to_num(grid_elev, nan=fallback)
 
         return grid_elev.reshape(-1, 1), np.c_[grid_x_raster, grid_y_raster]
+
+    def get_prediction_grid_context(
+        self, rep, geo_proc, elevation_data, transform_matrix, crs
+    ):
+        rep_crs = getattr(rep, "crs", None) or "EPSG:4326"
+        bounds = tuple(float(x) for x in rep.total_bounds)
+        key = (
+            bounds,
+            str(rep_crs),
+            str(crs),
+            self.grid_x_points,
+            self.grid_y_points,
+            tuple(transform_matrix),
+            elevation_data.shape,
+        )
+        cached = self._grid_context_cache.get(key)
+        if cached is not None:
+            return cached
+
+        grid_x, grid_y = np.mgrid[
+            bounds[0] : bounds[2] : complex(self.grid_x_points),
+            bounds[1] : bounds[3] : complex(self.grid_y_points),
+        ]
+        mask = geo_proc.create_mask(rep, grid_x, grid_y)
+
+        to_raster = self._get_transformer(rep_crs, crs)
+        grid_x_flat = grid_x.ravel()
+        grid_y_flat = grid_y.ravel()
+        grid_x_raster, grid_y_raster = to_raster.transform(grid_x_flat, grid_y_flat)
+        rows, cols = rowcol(transform_matrix, grid_x_raster, grid_y_raster)
+        rows = np.clip(np.floor(rows).astype(int), 0, elevation_data.shape[0] - 1)
+        cols = np.clip(np.floor(cols).astype(int), 0, elevation_data.shape[1] - 1)
+        grid_elev = elevation_data[rows, cols]
+
+        cached = {
+            "rep_crs": rep_crs,
+            "grid_x": grid_x,
+            "grid_y": grid_y,
+            "mask": mask,
+            "coords_pred": np.c_[grid_x_raster, grid_y_raster],
+            "grid_elev_template": grid_elev,
+        }
+        self._grid_context_cache[key] = cached
+        return cached
 
     def interpolate(
         self,
@@ -178,13 +232,12 @@ class SpatialInterpolator:
             self.nlags,
         )
         try:
-            rep_crs = getattr(rep, "crs", None) or "EPSG:4326"
-            bounds = rep.total_bounds
-            grid_x, grid_y = np.mgrid[
-                bounds[0] : bounds[2] : complex(self.grid_x_points),
-                bounds[1] : bounds[3] : complex(self.grid_y_points),
-            ]
-            mask = geo_proc.create_mask(rep, grid_x, grid_y)
+            grid_ctx = self.get_prediction_grid_context(
+                rep, geo_proc, elevation_data, transform_matrix, crs
+            )
+            grid_x = grid_ctx["grid_x"]
+            grid_y = grid_ctx["grid_y"]
+            mask = grid_ctx["mask"]
 
             valid_points = (
                 df["Longitude"].notna()
@@ -211,15 +264,10 @@ class SpatialInterpolator:
                 with suppress_stdout():
                     rk.fit(X_train, coords_train, temp)
 
-            X_pred, coords_pred = self._prepare_prediction_grid(
-                grid_x,
-                grid_y,
-                elevation_data,
-                transform_matrix,
-                crs,
-                rep_crs,
-                mean_elev,
-            )
+            X_pred = np.nan_to_num(
+                grid_ctx["grid_elev_template"], nan=mean_elev
+            ).reshape(-1, 1)
+            coords_pred = grid_ctx["coords_pred"]
             with suppress_stdout():
                 grid_predicted_temp = rk.predict(X_pred, coords_pred).reshape(
                     grid_x.shape

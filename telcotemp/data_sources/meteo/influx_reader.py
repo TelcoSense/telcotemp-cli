@@ -27,28 +27,48 @@ class MeteoInfluxReader(InfluxReader):
 
         try:
             with InfluxDBClient(url=self.url, token=self.token, org=self.org) as client:
-                result = client.query_api().query(org=self.org, query=query)
+                result = client.query_api().query_data_frame(
+                    org=self.org, query=query
+                )
         except Exception as e:
             self.logger.error(f"Error fetching from InfluxDB: {e}")
             return pd.DataFrame()
 
-        records = []
-        for table in result:
-            for record in table.records:
-                records.append(
-                    {
-                        "Time": record.get_time(),
-                        "ID": record.values.get("_field"),
-                        "Temperature": record.get_value(),
-                    }
-                )
-
-        if not records:
+        frames = result if isinstance(result, list) else [result]
+        frames = [frame for frame in frames if isinstance(frame, pd.DataFrame) and not frame.empty]
+        if not frames:
             self.logger.warning("No data returned from InfluxDB")
             return pd.DataFrame()
 
-        df = pd.DataFrame(records)
+        df = pd.concat(frames, ignore_index=True)
+        drop_columns = [
+            column
+            for column in ["result", "table", "_start", "_stop"]
+            if column in df.columns
+        ]
+        if drop_columns:
+            df = df.drop(columns=drop_columns)
+        if "_time" not in df.columns:
+            self.logger.warning("Meteo query returned no _time column")
+            return pd.DataFrame()
+
+        value_columns = [
+            column for column in df.columns if column not in {"_time", "agent_host"}
+        ]
+        if not value_columns:
+            self.logger.warning("Meteo query returned no station columns after pivot")
+            return pd.DataFrame()
+
+        df = df.melt(
+            id_vars=["_time"],
+            value_vars=value_columns,
+            var_name="ID",
+            value_name="Temperature",
+        )
+        df = df.dropna(subset=["Temperature"])
+        df.rename(columns={"_time": "Time"}, inplace=True)
         df["Time"] = pd.to_datetime(df["Time"], utc=True)
+        df = df.sort_values(["Time", "ID"]).reset_index(drop=True)
 
         self.logger.info(f"Fetched {len(df)} Meteo records")
         return df
@@ -67,6 +87,7 @@ from(bucket: "{self.bucket}")
   |> range(start: {start_iso}, stop: {end_iso})
   |> filter(fn: (r) => {measurements_filter})
   |> aggregateWindow(every: {self.window}, fn: mean, createEmpty: false)
-  |> keep(columns: ["_time", "_value", "_field", "agent_host"])
+  |> keep(columns: ["_time", "_value", "_field"])
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
 """
         return query

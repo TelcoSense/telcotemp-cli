@@ -8,7 +8,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from telcotemp.processing.ml_modeling import temperature_predict
+from telcotemp.processing.ml_modeling import (
+    get_ml_prediction_lookback,
+    temperature_predict,
+)
 
 
 @dataclass
@@ -110,15 +113,17 @@ def run_bias_report(
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     # Load raw data
-    cml_df = cml_engine.data_source.fetch_data(start_time, end_time)
+    ml_cfg = cml_engine.config.get_ml()
+    history_start = start_time - get_ml_prediction_lookback(ml_cfg)
+
+    cml_df = cml_engine.data_source.fetch_data(history_start, end_time)
     cml_df = cml_engine.data_source.prepare_data(cml_df, filter_ids=None)
 
-    ml_cfg = cml_engine.config.get_ml()
     cml_df = temperature_predict(
         cml_df,
-        ml_cfg["scaler_path"],
-        ml_cfg["lstm_path"],
-        bias_offset=ml_cfg.get("bias_offset", 0.0),
+        ml_config=ml_cfg,
+        prediction_start=start_time,
+        prediction_end=end_time,
     )
 
     met_df = meteo_engine.data_source.fetch_data(start_time, end_time)
