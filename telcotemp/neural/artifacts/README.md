@@ -17,14 +17,15 @@ technologies = ["1s10", "ceragon_ip_20", "summit", "summit_bt"]
 seq_len = 36
 sample_minutes = 10
 model_type = lstm
-hidden_size = 64
-num_layers = 2
-dropout = 0.2
+hidden_size = 96
+num_layers = 4
+dropout = 0.3
 technology_embed_dim = 8
-mlp_hidden_size = 64
+mlp_hidden_size = 96
 head_activation = gelu
 use_layer_norm = false
-bidirectional = false
+bidirectional = true
+temporal_readout = last
 ```
 
 Optional compatibility fallbacks:

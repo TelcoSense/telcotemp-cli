@@ -10,7 +10,7 @@ The repository contains the full runtime pipeline: data fetch, metadata enrichme
 
 ## What The Repo Does
 
-At a high level, TelcoTemp turns time-series measurements into hourly temperature surfaces over the Czech Republic.
+At a high level, TelcoTemp turns time-series measurements into hourly interpolared temperature maps over the Czech Republic.
 
 - In `cml` mode, TelcoTemp fetches microwave-link measurements, enriches them with link metadata, predicts air temperature with a PyTorch LSTM, merges nearby endpoints into roof-level interpolation points, and renders hourly maps.
 - In `meteo` mode, it fetches station temperatures directly and interpolates them into maps.
@@ -135,8 +135,11 @@ The CML neural-network path is sensitive to consistency between:
 - configured technologies
 - sequence grouping
 - sampling interval
+- temporal readout strategy
 
 The runtime currently supports `group_col = cml_id`, where `cml_id` is interpreted as `Link_ID + "_" + Side`, matching the dataset-preparation pipeline used for training.
+
+For map rendering, `[visualization] scale_mode = static_cz_adaptive` is the recommended default when you want to keep the Czech absolute palette but still improve contrast on narrow-range days. Use `static_cz` when strict day-to-day color comparability matters more than per-map contrast.
 
 ## Diagnostics And Logging
 

@@ -40,8 +40,10 @@ retention_days = 30
 n_levels = 15
 colormap = []
 median_offset = 2
-; Scale mode: 'dynamic' - based on temperature median, 'static' - fixed temperature scale
-scale_mode = static
+; Scale mode: 'dynamic' - centered on current median, 'static' - legacy wide fixed scale,
+; 'static_cz' - denser Czech-focused fixed absolute scale,
+; 'static_cz_adaptive' - same Czech palette, but adaptive window for better daily contrast
+scale_mode = static_cz_adaptive
 
 ; MACHINE LEARNING CONFIGURATION (CML mode)
 [ml]
@@ -61,14 +63,15 @@ seq_len = 36
 sample_minutes = 10
 ; LSTM model parameters are provided here in config.
 model_type = lstm
-hidden_size = 64
-num_layers = 2
-dropout = 0.2
+hidden_size = 96
+num_layers = 4
+dropout = 0.3
 technology_embed_dim = 8
-mlp_hidden_size = 64
+mlp_hidden_size = 96
 head_activation = gelu
 use_layer_norm = false
-bidirectional = false
+bidirectional = true
+temporal_readout = last
 ; Legacy fallback if you still want to point to telcotemp_nn config directly:
 ; nn_config_path = ../TelcoTemp_NN/configs/lstm_temp.yaml
 ; model_name = lstm_gelu

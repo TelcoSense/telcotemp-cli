@@ -138,10 +138,17 @@ def _build_lstm_model_class():
             head_activation: str = "relu",
             use_layer_norm: bool = False,
             bidirectional: bool = False,
+            temporal_readout: str = "last",
         ):
             super().__init__()
             self.tech_emb = nn.Embedding(num_technologies, technology_embed_dim)
             self.bidirectional = bool(bidirectional)
+            self.temporal_readout = str(temporal_readout or "last").lower()
+            if self.temporal_readout not in {"last", "mean"}:
+                raise ValueError(
+                    "Unsupported temporal_readout: "
+                    f"{temporal_readout}. Expected 'last' or 'mean'."
+                )
             self.lstm = nn.LSTM(
                 input_size=seq_input_size,
                 hidden_size=hidden_size,
@@ -168,7 +175,11 @@ def _build_lstm_model_class():
             technology_idx: torch.Tensor,
         ) -> torch.Tensor:
             out, _ = self.lstm(x_seq)
-            h_last = self.norm(out[:, -1, :])
+            if self.temporal_readout == "mean":
+                temporal_features = out.mean(dim=1)
+            else:
+                temporal_features = out[:, -1, :]
+            h_last = self.norm(temporal_features)
             tech = self.tech_emb(technology_idx)
             x = torch.cat([h_last, x_static, tech], dim=1)
             return self.head(x).squeeze(1)
@@ -388,6 +399,7 @@ def _resolve_artifact_paths_and_config(
         "head_activation": ml_cfg.get("head_activation"),
         "use_layer_norm": _parse_optional_bool(ml_cfg.get("use_layer_norm")),
         "bidirectional": _parse_optional_bool(ml_cfg.get("bidirectional")),
+        "temporal_readout": ml_cfg.get("temporal_readout"),
     }
     for key, value in overrides.items():
         if value not in (None, ""):
@@ -453,6 +465,7 @@ def load_runtime_bundle(
     head_activation: str | None,
     use_layer_norm: bool | None,
     bidirectional: bool | None,
+    temporal_readout: str | None,
     device: str,
 ) -> SequenceRuntimeBundle:
     import torch
@@ -476,6 +489,7 @@ def load_runtime_bundle(
             "head_activation": head_activation,
             "use_layer_norm": use_layer_norm,
             "bidirectional": bidirectional,
+            "temporal_readout": temporal_readout,
         }
         artifact_settings, ckpt_path, summary_path, scalers_path, model_cfg = (
             _resolve_artifact_paths_and_config(ml_cfg)
@@ -571,6 +585,7 @@ def load_runtime_bundle(
         head_activation=str(model_cfg.get("head_activation", "relu")),
         use_layer_norm=bool(model_cfg.get("use_layer_norm", False)),
         bidirectional=bool(model_cfg.get("bidirectional", False)),
+        temporal_readout=str(model_cfg.get("temporal_readout", "last")),
     )
 
     checkpoint = torch.load(ckpt_path, map_location=resolved_device)
@@ -837,6 +852,7 @@ def predict_temperature_sequence(
         head_activation=ml_cfg.get("head_activation"),
         use_layer_norm=_parse_optional_bool(ml_cfg.get("use_layer_norm")),
         bidirectional=_parse_optional_bool(ml_cfg.get("bidirectional")),
+        temporal_readout=ml_cfg.get("temporal_readout"),
         device=ml_cfg.get("device", "cpu"),
     )
 

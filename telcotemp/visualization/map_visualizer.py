@@ -18,7 +18,7 @@ class MapVisualizer:
         self.scale_mode = self.vis.get("scale_mode", "dynamic")
         self._default_colormap_cache = self._default_colormap()
         self._dynamic_scale_cache = {}
-        self._static_scale_cache = None
+        self._fixed_scale_cache = {}
 
     def plot(
         self,
@@ -41,10 +41,16 @@ class MapVisualizer:
         :param show_boundary: Whether to display the boundary of the Czech Republic.
         """
         try:
-            if self.scale_mode == "static":
-                cmap, vmin, vmax, colormap_info = self._get_static_scale()
-            else:
+            if self.scale_mode == "dynamic":
                 cmap, vmin, vmax, colormap_info = self._get_dynamic_scale(grid_z)
+            elif self.scale_mode == "static_cz_adaptive":
+                cmap, vmin, vmax, colormap_info = self._get_static_cz_adaptive_scale(
+                    grid_z
+                )
+            elif self.scale_mode == "static_cz":
+                cmap, vmin, vmax, colormap_info = self._get_static_cz_scale()
+            else:
+                cmap, vmin, vmax, colormap_info = self._get_static_scale()
 
             fig, ax = plt.subplots(figsize=(8, 4), frameon=False)
             c = ax.pcolormesh(
@@ -118,26 +124,62 @@ class MapVisualizer:
 
         :return: (colormap, vmin, vmax, colormap_info)
         """
-        if self._static_scale_cache is None:
-            chmu_scale = self._static_colormap()
-            temps, _ = zip(*chmu_scale)
-            vmin = temps[0]
-            vmax = temps[-1]
+        return self._build_fixed_scale("static", self._static_colormap())
 
-            # Normalize temperature positions to [0, 1] range
-            normalized_scale = [
-                ((t - vmin) / (vmax - vmin), color) for t, color in chmu_scale
-            ]
+    def _get_static_cz_scale(self):
+        """
+        Returns a denser Czech-focused fixed temperature color scale.
 
-            cmap = mcolors.LinearSegmentedColormap.from_list(
-                "chmu_colormap", normalized_scale, N=256
-            )
-            colormap_info = [
-                {"level": temp, "color": color} for temp, color in chmu_scale
-            ]
-            self._static_scale_cache = (cmap, vmin, vmax, colormap_info)
+        :return: (colormap, vmin, vmax, colormap_info)
+        """
+        return self._build_fixed_scale(
+            "static_cz",
+            self._static_cz_colormap(),
+            under_color="#5f007a",
+            over_color="#7f0000",
+        )
 
-        return self._static_scale_cache
+    def _get_static_cz_adaptive_scale(self, grid_z):
+        """
+        Uses the static Czech palette, but adapts the displayed range to the
+        current grid so narrow-range days keep more contrast.
+        """
+        cmap, hard_min, hard_max, colormap_info = self._get_static_cz_scale()
+        values = np.asarray(grid_z, dtype=float)
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            return cmap, hard_min, hard_max, colormap_info
+
+        low = float(np.nanpercentile(values, 5))
+        high = float(np.nanpercentile(values, 95))
+        median = float(np.nanmedian(values))
+
+        margin_c = 1.0
+        min_span_c = 10.0
+
+        vmin = float(np.floor(low - margin_c))
+        vmax = float(np.ceil(high + margin_c))
+
+        if (vmax - vmin) < min_span_c:
+            half_span = min_span_c / 2.0
+            vmin = float(np.floor(median - half_span))
+            vmax = float(np.ceil(median + half_span))
+
+        if vmin < hard_min:
+            shift = hard_min - vmin
+            vmin = float(hard_min)
+            vmax = float(min(hard_max, vmax + shift))
+
+        if vmax > hard_max:
+            shift = vmax - hard_max
+            vmax = float(hard_max)
+            vmin = float(max(hard_min, vmin - shift))
+
+        if vmin >= vmax:
+            vmin = float(max(hard_min, median - 5.0))
+            vmax = float(min(hard_max, median + 5.0))
+
+        return cmap, vmin, vmax, colormap_info
 
     def map_plotting(
         self, grid_x, grid_y, grid_z, czech_rep, image_name, show_boundary=False
@@ -149,24 +191,6 @@ class MapVisualizer:
         """
         Returns the default color scale.
         """
-        # return [
-        #     (0, "#4E00A6"),
-        #     (1 / 14, "#3600D0"),
-        #     (2 / 14, "#1107F4"),
-        #     (3 / 14, "#0032F7"),
-        #     (4 / 14, "#0467FF"),
-        #     (5 / 14, "#04A3FF"),
-        #     (6 / 14, "#04D27F"),
-        #     (7 / 14, "#1BEC38"),
-        #     (8 / 14, "#63FF00"),
-        #     (9 / 14, "#F4FB0D"),
-        #     (10 / 14, "#FBE316"),
-        #     (11 / 14, "#F7C41B"),
-        #     (12 / 14, "#FC871D"),
-        #     (13 / 14, "#DB4F08"),
-        #     (1, "#A00000"),
-        # ]
-
         return [
             (0, "#a301e3"),
             (1 / 26, "#8100e8"),
@@ -230,3 +254,91 @@ class MapVisualizer:
             (35, "#f01438"),
             (50, "#FF0000"),
         ]
+
+    def _static_cz_colormap(self):
+        """
+        Returns a denser absolute scale tailored to Czech temperatures.
+        """
+        return [
+            (-20, "#7000d8"),
+            (-18, "#6200de"),
+            (-16, "#5300e4"),
+            (-14, "#3f10e8"),
+            (-12, "#2a28eb"),
+            (-10, "#1540ee"),
+            (-9, "#0d50ee"),
+            (-8, "#0660ed"),
+            (-7, "#0170eb"),
+            (-6, "#007fe8"),
+            (-5, "#038ee3"),
+            (-4, "#069cdc"),
+            (-3, "#0caad4"),
+            (-2, "#15b8cb"),
+            (-1, "#1fc5c1"),
+            (0, "#22cfe1"),
+            (1, "#18d7df"),
+            (2, "#10dddb"),
+            (3, "#0ce3d4"),
+            (4, "#0ce8ca"),
+            (5, "#0eebbd"),
+            (6, "#12edaf"),
+            (7, "#18ef9c"),
+            (8, "#24ef82"),
+            (9, "#37ec61"),
+            (10, "#52e52b"),
+            (11, "#74de1d"),
+            (12, "#97db1b"),
+            (13, "#badc1b"),
+            (14, "#d8df1a"),
+            (15, "#ecd81a"),
+            (16, "#f5c619"),
+            (17, "#fcb019"),
+            (18, "#ff871b"),
+            (19, "#ff8019"),
+            (20, "#ff681c"),
+            (21, "#ff5021"),
+            (22, "#ff3a27"),
+            (23, "#ff1d2e"),
+            (24, "#ff0e36"),
+            (25, "#fa0241"),
+            (26, "#e8004b"),
+            (27, "#d60055"),
+            (28, "#c3005d"),
+            (29, "#b00065"),
+            (30, "#9d006a"),
+            (31, "#89006d"),
+            (32, "#75006f"),
+            (33, "#62006f"),
+            (34, "#4f006c"),
+            (35, "#3d0067"),
+            (40, "#21003b"),
+        ]
+
+    def _build_fixed_scale(
+        self, scale_name, scale_points, under_color=None, over_color=None
+    ):
+        cache_key = (scale_name, under_color, over_color)
+        if cache_key not in self._fixed_scale_cache:
+            temps, _ = zip(*scale_points)
+            vmin = temps[0]
+            vmax = temps[-1]
+            normalized_scale = [
+                ((t - vmin) / (vmax - vmin), color) for t, color in scale_points
+            ]
+            cmap = mcolors.LinearSegmentedColormap.from_list(
+                f"{scale_name}_colormap", normalized_scale, N=256
+            )
+            if under_color is not None:
+                cmap.set_under(under_color)
+            if over_color is not None:
+                cmap.set_over(over_color)
+            colormap_info = [
+                {"level": temp, "color": color} for temp, color in scale_points
+            ]
+            if under_color is not None:
+                colormap_info.append({"level": "<min", "color": under_color})
+            if over_color is not None:
+                colormap_info.append({"level": ">max", "color": over_color})
+            self._fixed_scale_cache[cache_key] = (cmap, vmin, vmax, colormap_info)
+        return self._fixed_scale_cache[cache_key]
+

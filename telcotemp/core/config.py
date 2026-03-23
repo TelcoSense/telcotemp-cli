@@ -129,6 +129,7 @@ class AppConfig:
             "head_activation": ml.get("head_activation"),
             "use_layer_norm": ml.get("use_layer_norm"),
             "bidirectional": ml.get("bidirectional"),
+            "temporal_readout": ml.get("temporal_readout"),
             "group_col": ml.get("group_col", "IP"),
             "device": ml.get("device", "cpu"),
             "inference_batch_size": ml.get("inference_batch_size"),
