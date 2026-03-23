@@ -43,7 +43,7 @@ median_offset = 2
 ; Scale mode: 'dynamic' - centered on current median, 'static' - legacy wide fixed scale,
 ; 'static_cz' - denser Czech-focused fixed absolute scale,
 ; 'static_cz_adaptive' - same Czech palette, but adaptive window for better daily contrast
-scale_mode = static_cz_adaptive
+scale_mode = static_cz
 
 ; MACHINE LEARNING CONFIGURATION (CML mode)
 [ml]
