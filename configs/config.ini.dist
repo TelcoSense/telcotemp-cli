@@ -59,7 +59,7 @@ technologies = ["1s10", "ceragon_ip_20", "summit", "summit_bt"]
 ; Optional fallback if you want to read technologies from a file instead:
 ; prepare_summary_path = prepare_summary.json
 ; Window settings are provided here in config.
-seq_len = 36
+seq_len = 72
 sample_minutes = 10
 ; LSTM model parameters are provided here in config.
 model_type = lstm
