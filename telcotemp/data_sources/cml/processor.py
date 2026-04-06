@@ -87,14 +87,12 @@ class CMLDataSource(DataSource):
         # Add daylight flag
         from telcotemp.utils.time_utils import is_daylight
 
-        df["sun"] = df["Time"].apply(
-            lambda ts: is_daylight(
-                ts,
-                self._location["lat"],
-                self._location["lng"],
-                self._location["tz"],
+        df["sun"] = [
+            is_daylight(ts, lat, lon, self._location["tz"])
+            for ts, lat, lon in zip(
+                df["Time"], df["Latitude"], df["Longitude"], strict=False
             )
-        )
+        ]
 
         # Add time features
         df["Hour"] = df["Time"].dt.hour

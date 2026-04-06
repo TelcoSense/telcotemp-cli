@@ -48,33 +48,17 @@ scale_mode = static_cz
 ; MACHINE LEARNING CONFIGURATION (CML mode)
 [ml]
 ; Preferred self-contained setup:
-; Put a model artifact inside telcotemp/neural/artifacts/<name>/
-; with best.pt and scaler_bundle.json.
-artifact_dir = telcotemp/neural/artifacts/current
-; Default filenames inside artifact_dir:
-checkpoint_path = best.pt
-scaler_bundle_path = scaler_bundle.json
-; Technologies are expected from config to keep runtime self-contained.
-technologies = ["1s10", "ceragon_ip_20", "summit", "summit_bt"]
+; Put checkpoints + artifact.yaml + scaler_bundle.json into one artifact folder.
+artifact_dir = telcotemp/neural/artifacts
+; Choose the model key defined inside artifact.yaml/json.
+; Model architecture and window settings are read from the artifact metadata.
+model_name = lstm_v6_final2
+; Technologies can be stored inside artifact.yaml/json or inferred from checkpoint metadata.
 ; Optional fallback if you want to read technologies from a file instead:
 ; prepare_summary_path = prepare_summary.json
-; Window settings are provided here in config.
-seq_len = 72
-sample_minutes = 10
-; LSTM model parameters are provided here in config.
-model_type = lstm
-hidden_size = 96
-num_layers = 4
-dropout = 0.3
-technology_embed_dim = 8
-mlp_hidden_size = 96
-head_activation = gelu
-use_layer_norm = false
-bidirectional = true
-temporal_readout = last
 ; Legacy fallback if you still want to point to telcotemp_nn config directly:
 ; nn_config_path = ../TelcoTemp_NN/configs/lstm_temp.yaml
-; model_name = lstm_gelu
+; In that legacy mode, model_name is the key from the training config.
 ; Sequence grouping should match how cml_id was defined during training.
 ; For the current dataset_preparation pipeline, cml_id = Link_ID + "_" + Side.
 ; Valid values are any runtime column such as IP, Link_ID, cml_id, or Link_ID_Side.
@@ -118,6 +102,19 @@ url =
 token = 
 org = 
 
+; METEO MODE CONFIGURATION
+[influx]
+url = 
+token = 
+org = 
+bucket = chmi_data
+measurements = T
+fields = Temperature
+tag_device = agent_host
+field_temperature = Temperature
+window = 10m
+range = -2h
+
 ; CML MODE CONFIGURATION
 [influx_read]
 bucket = realtime_cbl
@@ -137,15 +134,4 @@ tag_side = side
 field_temperature = temperature
 enable_write = false
 
-; METEO MODE CONFIGURATION
-[influx]
-url = 
-token = 
-org = 
-bucket = chmi_data
-measurements = T
-fields = Temperature
-tag_device = agent_host
-field_temperature = Temperature
-window = 10m
-range = -2h
+

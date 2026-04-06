@@ -247,6 +247,16 @@ def _parse_optional_bool(value):
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _normalize_string_list(values) -> list[str]:
+    if values in (None, ""):
+        return []
+    if isinstance(values, str):
+        return [values]
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(f"Expected a list of strings, got {type(values).__name__}.")
+    return [str(item) for item in values]
+
+
 def _resolve_path(base_dir: Path | None, raw_path: str | None, default_name: str) -> Path:
     candidate = raw_path or default_name
     path = Path(candidate).expanduser()
@@ -284,6 +294,50 @@ def _load_artifact_config(artifact_dir: Path | None, artifact_config_path: str |
     return {}
 
 
+def _resolve_artifact_model_entry(
+    artifact_cfg: dict,
+    model_name: str | None,
+) -> tuple[str | None, dict]:
+    requested_model = (
+        str(model_name).strip() if model_name not in (None, "") else ""
+    )
+    models_cfg = artifact_cfg.get("models")
+    if isinstance(models_cfg, dict) and models_cfg:
+        if requested_model:
+            selected_name = requested_model
+        else:
+            default_model = artifact_cfg.get("default_model")
+            if default_model not in (None, ""):
+                selected_name = str(default_model).strip()
+            elif len(models_cfg) == 1:
+                selected_name = str(next(iter(models_cfg)))
+            else:
+                raise ValueError(
+                    "Multiple artifact models are configured. Set [ml] model_name "
+                    "or define default_model in artifact.yaml/json."
+                )
+
+        if selected_name not in models_cfg:
+            raise KeyError(
+                f"Model '{selected_name}' was not found in artifact config. "
+                f"Available models: {sorted(models_cfg)}"
+            )
+
+        selected_cfg = models_cfg.get(selected_name) or {}
+        if not isinstance(selected_cfg, dict):
+            raise TypeError(
+                f"Artifact config entry for model '{selected_name}' must be a mapping."
+            )
+        return selected_name, dict(selected_cfg)
+
+    legacy_model_cfg = artifact_cfg.get("model", {})
+    if legacy_model_cfg in (None, ""):
+        legacy_model_cfg = {}
+    if not isinstance(legacy_model_cfg, dict):
+        raise TypeError("Artifact config field 'model' must be a mapping.")
+    return (requested_model or None), dict(legacy_model_cfg)
+
+
 def _artifact_window_settings(ml_cfg: dict) -> dict | None:
     artifact_dir_raw = ml_cfg.get("artifact_dir")
     artifact_dir = (
@@ -298,12 +352,32 @@ def _artifact_window_settings(ml_cfg: dict) -> dict | None:
     if artifact_dir is None and not artifact_cfg:
         return None
 
+    artifact_model_name, artifact_model_cfg = _resolve_artifact_model_entry(
+        artifact_cfg, ml_cfg.get("model_name")
+    )
     window_cfg = artifact_cfg.get("window", {})
+    if not isinstance(window_cfg, dict):
+        raise TypeError("Artifact config field 'window' must be a mapping.")
+    model_window_cfg = artifact_model_cfg.get("window", {})
+    if model_window_cfg in (None, ""):
+        model_window_cfg = {}
+    if not isinstance(model_window_cfg, dict):
+        raise TypeError(
+            f"Artifact config window for model '{artifact_model_name}' must be a mapping."
+        )
     seq_len = _parse_optional_int(ml_cfg.get("seq_len"))
     sample_minutes = _parse_optional_int(ml_cfg.get("sample_minutes"))
 
     if seq_len is None:
+        seq_len = _parse_optional_int(model_window_cfg.get("seq_len"))
+    if seq_len is None:
+        seq_len = _parse_optional_int(artifact_model_cfg.get("seq_len"))
+    if seq_len is None:
         seq_len = _parse_optional_int(window_cfg.get("seq_len"))
+    if sample_minutes is None:
+        sample_minutes = _parse_optional_int(model_window_cfg.get("sample_minutes"))
+    if sample_minutes is None:
+        sample_minutes = _parse_optional_int(artifact_model_cfg.get("sample_minutes"))
     if sample_minutes is None:
         sample_minutes = _parse_optional_int(window_cfg.get("sample_minutes"))
 
@@ -321,6 +395,8 @@ def _artifact_window_settings(ml_cfg: dict) -> dict | None:
     return {
         "artifact_dir": artifact_dir,
         "artifact_cfg": artifact_cfg,
+        "artifact_model_name": artifact_model_name,
+        "artifact_model_cfg": artifact_model_cfg,
         "seq_len": seq_len,
         "sample_minutes": sample_minutes,
     }
@@ -387,7 +463,8 @@ def _resolve_artifact_paths_and_config(
 
     artifact_dir = artifact_settings["artifact_dir"]
     artifact_cfg = artifact_settings["artifact_cfg"]
-    model_cfg = artifact_cfg.get("model", {}).copy()
+    artifact_model_name = artifact_settings["artifact_model_name"]
+    model_cfg = artifact_settings["artifact_model_cfg"].copy()
 
     overrides = {
         "type": ml_cfg.get("model_type"),
@@ -424,22 +501,61 @@ def _resolve_artifact_paths_and_config(
         )
 
     paths_cfg = artifact_cfg.get("paths", {})
+    if not isinstance(paths_cfg, dict):
+        raise TypeError("Artifact config field 'paths' must be a mapping.")
+
+    model_paths_cfg = model_cfg.get("paths", {})
+    if model_paths_cfg in (None, ""):
+        model_paths_cfg = {}
+    if not isinstance(model_paths_cfg, dict):
+        raise TypeError(
+            f"Artifact config paths for model '{artifact_model_name}' must be a mapping."
+        )
+
+    checkpoints_cfg = artifact_cfg.get("checkpoints", {})
+    if checkpoints_cfg in (None, ""):
+        checkpoints_cfg = {}
+    if not isinstance(checkpoints_cfg, dict):
+        raise TypeError("Artifact config field 'checkpoints' must be a mapping.")
+
+    checkpoint_raw = ml_cfg.get("checkpoint_path")
+    if checkpoint_raw in (None, ""):
+        checkpoint_raw = (
+            model_paths_cfg.get("checkpoint")
+            or model_cfg.get("checkpoint")
+            or model_cfg.get("checkpoint_path")
+        )
+    if checkpoint_raw in (None, "") and artifact_model_name:
+        checkpoint_raw = checkpoints_cfg.get(artifact_model_name)
     checkpoint_path = _resolve_path(
         artifact_dir,
-        ml_cfg.get("checkpoint_path") or paths_cfg.get("checkpoint"),
+        checkpoint_raw or paths_cfg.get("checkpoint"),
         "best.pt",
     )
-    summary_raw = ml_cfg.get("prepare_summary_path") or paths_cfg.get("prepare_summary")
+
+    summary_raw = ml_cfg.get("prepare_summary_path")
+    if summary_raw in (None, ""):
+        summary_raw = (
+            model_paths_cfg.get("prepare_summary")
+            or model_cfg.get("prepare_summary")
+            or model_cfg.get("prepare_summary_path")
+            or paths_cfg.get("prepare_summary")
+        )
     summary_path = (
         _resolve_path(artifact_dir, summary_raw, "prepare_summary.json")
         if summary_raw not in (None, "")
         else None
     )
-    scalers_path = _resolve_path(
-        artifact_dir,
-        ml_cfg.get("scaler_bundle_path") or paths_cfg.get("scaler_bundle"),
-        "scaler_bundle.json",
-    )
+
+    scalers_raw = ml_cfg.get("scaler_bundle_path")
+    if scalers_raw in (None, ""):
+        scalers_raw = (
+            model_paths_cfg.get("scaler_bundle")
+            or model_cfg.get("scaler_bundle")
+            or model_cfg.get("scaler_bundle_path")
+            or paths_cfg.get("scaler_bundle")
+        )
+    scalers_path = _resolve_path(artifact_dir, scalers_raw, "scaler_bundle.json")
 
     return artifact_settings, checkpoint_path, summary_path, scalers_path, model_cfg
 
@@ -470,6 +586,7 @@ def load_runtime_bundle(
 ) -> SequenceRuntimeBundle:
     import torch
 
+    checkpoint = None
     if artifact_dir or artifact_config_path:
         ml_cfg = {
             "artifact_dir": artifact_dir,
@@ -496,43 +613,58 @@ def load_runtime_bundle(
         )
         resolved_seq_len = artifact_settings["seq_len"]
         resolved_sample_minutes = artifact_settings["sample_minutes"]
+        artifact_cfg = artifact_settings["artifact_cfg"]
     else:
         if not nn_config_path:
             raise ValueError(
                 "No local artifact configuration was found and nn_config_path is missing."
             )
+        resolved_model_name = model_name or "lstm_gelu"
         cfg, ckpt_path, summary_path, scalers_path = _resolve_repo_paths(
             nn_config_path=nn_config_path,
-            model_name=model_name,
+            model_name=resolved_model_name,
             checkpoint_path=checkpoint_path,
             prepare_summary_path=prepare_summary_path,
             scaler_bundle_path=scaler_bundle_path,
         )
 
-        model_cfg = (cfg.get("models") or {}).get(model_name)
+        model_cfg = (cfg.get("models") or {}).get(resolved_model_name)
         if not model_cfg:
             raise KeyError(
-                f"Model '{model_name}' was not found in training config {nn_config_path}."
+                f"Model '{resolved_model_name}' was not found in training config {nn_config_path}."
             )
         if str(model_cfg.get("type", "lstm")).lower() != "lstm":
             raise ValueError(
-                f"Model '{model_name}' is not an LSTM. Only LSTM checkpoints are supported."
+                f"Model '{resolved_model_name}' is not an LSTM. Only LSTM checkpoints are supported."
             )
         resolved_seq_len = int(cfg["window"]["seq_len"])
         resolved_sample_minutes = int(cfg["window"]["sample_minutes"])
+        artifact_cfg = {}
 
     if technologies:
         techs = [_normalize_technology_label(item) for item in technologies]
     else:
-        if summary_path is None:
-            raise ValueError(
-                "No technologies were configured. Set [ml] technologies or provide prepare_summary_path."
+        techs = _normalize_string_list(model_cfg.get("technologies"))
+        if not techs:
+            techs = _normalize_string_list(artifact_cfg.get("technologies"))
+        if not techs and summary_path is not None:
+            prepare_summary = _read_json(summary_path)
+            techs = _normalize_string_list(prepare_summary.get("technologies"))
+        if not techs:
+            checkpoint = torch.load(ckpt_path, map_location="cpu")
+            checkpoint_vocab = (
+                checkpoint.get("technology_vocab", [])
+                if isinstance(checkpoint, dict)
+                else []
             )
-        prepare_summary = _read_json(summary_path)
-        techs = [
-            _normalize_technology_label(item)
-            for item in prepare_summary["technologies"]
-        ]
+            techs = _normalize_string_list(checkpoint_vocab)
+        if not techs:
+            raise ValueError(
+                "No technologies were configured. Set [ml] technologies, add technologies "
+                "to artifact.yaml/json, provide prepare_summary_path, or store "
+                "technology_vocab in the checkpoint."
+            )
+        techs = [_normalize_technology_label(item) for item in techs]
     tech_to_idx = {name: idx for idx, name in enumerate(techs)}
 
     seq_scaler = None
@@ -588,7 +720,8 @@ def load_runtime_bundle(
         temporal_readout=str(model_cfg.get("temporal_readout", "last")),
     )
 
-    checkpoint = torch.load(ckpt_path, map_location=resolved_device)
+    if checkpoint is None:
+        checkpoint = torch.load(ckpt_path, map_location=resolved_device)
     state_dict = checkpoint["model_state"] if "model_state" in checkpoint else checkpoint
     model.load_state_dict(state_dict)
     model.to(resolved_device)

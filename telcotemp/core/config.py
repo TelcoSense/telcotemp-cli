@@ -113,7 +113,7 @@ class AppConfig:
             "artifact_dir": ml.get("artifact_dir"),
             "artifact_config_path": ml.get("artifact_config_path"),
             "nn_config_path": ml.get("nn_config_path"),
-            "model_name": ml.get("model_name", "lstm_gelu"),
+            "model_name": ml.get("model_name", ""),
             "checkpoint_path": ml.get("checkpoint_path"),
             "prepare_summary_path": ml.get("prepare_summary_path"),
             "scaler_bundle_path": ml.get("scaler_bundle_path"),

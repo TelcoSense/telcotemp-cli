@@ -1,0 +1,40 @@
+default_model: lstm_v6_final2
+
+window:
+  seq_len: 72
+  sample_minutes: 10
+
+technologies:
+  - 1s10
+  - ceragon_ip_20
+  - summit
+  - summit_bt
+
+paths:
+  scaler_bundle: scaler_bundle.json
+
+models:
+  lstm_v6_final1:
+    checkpoint: lstm_v6_final1.pt
+    type: lstm
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.2
+    technology_embed_dim: 8
+    mlp_hidden_size: 64
+    head_activation: gelu
+    use_layer_norm: false
+    bidirectional: false
+    temporal_readout: last
+  lstm_v6_final2:
+    checkpoint: lstm_v6_final2.pt
+    type: lstm
+    hidden_size: 96
+    num_layers: 4
+    dropout: 0.3
+    technology_embed_dim: 8
+    mlp_hidden_size: 96
+    head_activation: gelu
+    use_layer_norm: false
+    bidirectional: true
+    temporal_readout: last
