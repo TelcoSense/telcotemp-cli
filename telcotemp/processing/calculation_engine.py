@@ -688,12 +688,19 @@ class CombinedCalculationEngine:
                 if diag_conf["enable_bias_report"]:
                     self.logger.info("[COMBINED] Bias report enabled")
                     out_dir = diag_conf["bias_report_dir"]
-                    run_bias_report(
+                    report = run_bias_report(
                         cml_engine=self.cml_engine,
                         meteo_engine=self.meteo_engine,
                         start_time=hour_start,
                         end_time=hour_end,
                         out_dir=out_dir,
+                    )
+                    self.logger.info(
+                        "[COMBINED] Diagnostics summary for %s -> %s: samples=%d, MAE=%.3f C",
+                        hour_start.strftime("%Y-%m-%d %H:%M"),
+                        hour_end.strftime("%Y-%m-%d %H:%M"),
+                        report.sample_count,
+                        report.mae,
                     )
 
             self.logger.debug(

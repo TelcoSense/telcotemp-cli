@@ -18,8 +18,11 @@ from telcotemp.processing.ml_modeling import (
 class BiasReportResult:
     df: pd.DataFrame
     csv_path: str
+    summary_csv_path: str
     plot_bias_vs_sun_path: str
     plot_bias_vs_hour_path: str
+    mae: float
+    sample_count: int
 
 
 def _to_10min_median(
@@ -45,6 +48,7 @@ def build_bias_timeseries(
 
     out = cml_med.merge(met_med, on="t10", how="inner")
     out["bias"] = out["cml_med"] - out["meteo_med"]
+    out["abs_error"] = out["bias"].abs()
 
     # attach sun/hour from CML (median sun, first hour)
     feat = cml_df[["Time", "sun", "Hour"]].copy()
@@ -133,16 +137,38 @@ def run_bias_report(
 
     stamp = f"{pd.to_datetime(start_time).strftime('%Y%m%d_%H%M')}-{pd.to_datetime(end_time).strftime('%Y%m%d_%H%M')}"
     csv_path = os.path.join(out_dir, f"bias_{stamp}.csv")
+    summary_csv_path = os.path.join(out_dir, f"bias_summary_{stamp}.csv")
     p1 = os.path.join(out_dir, f"bias_vs_sun_{stamp}.png")
     p2 = os.path.join(out_dir, f"bias_vs_hour_{stamp}.png")
 
+    sample_count = int(len(df_bias))
+    mae = (
+        float(df_bias["abs_error"].mean())
+        if sample_count and "abs_error" in df_bias.columns
+        else float("nan")
+    )
+    summary_df = pd.DataFrame(
+        [
+            {
+                "start_time": pd.to_datetime(start_time),
+                "end_time": pd.to_datetime(end_time),
+                "sample_count": sample_count,
+                "mae": mae,
+            }
+        ]
+    )
+
     df_bias.to_csv(csv_path, index=False)
+    summary_df.to_csv(summary_csv_path, index=False)
     plot_bias_vs_sun(df_bias, p1)
     plot_bias_vs_hour(df_bias, p2)
 
     return BiasReportResult(
         df=df_bias,
         csv_path=csv_path,
+        summary_csv_path=summary_csv_path,
         plot_bias_vs_sun_path=p1,
         plot_bias_vs_hour_path=p2,
+        mae=mae,
+        sample_count=sample_count,
     )

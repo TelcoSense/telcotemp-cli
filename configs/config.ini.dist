@@ -52,7 +52,7 @@ scale_mode = static_cz
 artifact_dir = telcotemp/neural/artifacts
 ; Choose the model key defined inside artifact.yaml/json.
 ; Model architecture and window settings are read from the artifact metadata.
-model_name = lstm_v6_final2
+model_name = lstm_v6
 ; Technologies can be stored inside artifact.yaml/json or inferred from checkpoint metadata.
 ; Optional fallback if you want to read technologies from a file instead:
 ; prepare_summary_path = prepare_summary.json

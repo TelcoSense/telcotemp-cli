@@ -11,6 +11,7 @@ import pandas as pd
 import yaml
 
 LOGGER = logging.getLogger("backend_logger")
+_LOGGED_RUNTIME_SIGNATURES: set[tuple[str, ...]] = set()
 
 SEQ_FEATURE_COLUMNS = [
     "Temperature_MW",
@@ -199,6 +200,10 @@ class SequenceRuntimeBundle:
     target_scaler: StandardScaler | None
     model: object
     device: str
+    configured_model_name: str
+    resolved_model_name: str
+    checkpoint_path: str
+    checkpoint_model_name: str
 
 
 @dataclass
@@ -587,10 +592,13 @@ def load_runtime_bundle(
     import torch
 
     checkpoint = None
+    configured_model_name = str(model_name or "").strip()
+    resolved_model_name = configured_model_name
     if artifact_dir or artifact_config_path:
         ml_cfg = {
             "artifact_dir": artifact_dir,
             "artifact_config_path": artifact_config_path,
+            "model_name": model_name,
             "checkpoint_path": checkpoint_path,
             "prepare_summary_path": prepare_summary_path,
             "scaler_bundle_path": scaler_bundle_path,
@@ -614,12 +622,15 @@ def load_runtime_bundle(
         resolved_seq_len = artifact_settings["seq_len"]
         resolved_sample_minutes = artifact_settings["sample_minutes"]
         artifact_cfg = artifact_settings["artifact_cfg"]
+        resolved_model_name = str(
+            artifact_settings.get("artifact_model_name") or configured_model_name or ""
+        ).strip()
     else:
         if not nn_config_path:
             raise ValueError(
                 "No local artifact configuration was found and nn_config_path is missing."
             )
-        resolved_model_name = model_name or "lstm_gelu"
+        resolved_model_name = configured_model_name or "lstm_gelu"
         cfg, ckpt_path, summary_path, scalers_path = _resolve_repo_paths(
             nn_config_path=nn_config_path,
             model_name=resolved_model_name,
@@ -640,6 +651,14 @@ def load_runtime_bundle(
         resolved_seq_len = int(cfg["window"]["seq_len"])
         resolved_sample_minutes = int(cfg["window"]["sample_minutes"])
         artifact_cfg = {}
+
+    if configured_model_name and resolved_model_name:
+        if configured_model_name != resolved_model_name:
+            raise ValueError(
+                "Configured model name does not match the resolved runtime model: "
+                f"configured='{configured_model_name}', "
+                f"resolved='{resolved_model_name}'."
+            )
 
     if technologies:
         techs = [_normalize_technology_label(item) for item in technologies]
@@ -722,10 +741,24 @@ def load_runtime_bundle(
 
     if checkpoint is None:
         checkpoint = torch.load(ckpt_path, map_location=resolved_device)
+    checkpoint_model_name = ""
+    if isinstance(checkpoint, dict):
+        checkpoint_model_name = str(checkpoint.get("model_name") or "").strip()
     state_dict = checkpoint["model_state"] if "model_state" in checkpoint else checkpoint
     model.load_state_dict(state_dict)
     model.to(resolved_device)
     model.eval()
+
+    LOGGER.info(
+        "[CML][model] loaded configured_model=%s resolved_model=%s checkpoint=%s checkpoint_model=%s seq_len=%d sample_minutes=%d device=%s",
+        configured_model_name or "<default>",
+        resolved_model_name or "<legacy>",
+        Path(ckpt_path).name,
+        checkpoint_model_name or "<missing>",
+        resolved_seq_len,
+        resolved_sample_minutes,
+        resolved_device,
+    )
 
     return SequenceRuntimeBundle(
         seq_len=resolved_seq_len,
@@ -738,6 +771,10 @@ def load_runtime_bundle(
         target_scaler=target_scaler,
         model=model,
         device=resolved_device,
+        configured_model_name=configured_model_name,
+        resolved_model_name=resolved_model_name,
+        checkpoint_path=str(ckpt_path),
+        checkpoint_model_name=checkpoint_model_name,
     )
 
 
@@ -988,6 +1025,25 @@ def predict_temperature_sequence(
         temporal_readout=ml_cfg.get("temporal_readout"),
         device=ml_cfg.get("device", "cpu"),
     )
+
+    runtime_signature = (
+        bundle.configured_model_name,
+        bundle.resolved_model_name,
+        bundle.checkpoint_path,
+        bundle.checkpoint_model_name,
+        str(bundle.seq_len),
+        str(bundle.sample_minutes),
+        bundle.device,
+    )
+    if runtime_signature not in _LOGGED_RUNTIME_SIGNATURES:
+        _LOGGED_RUNTIME_SIGNATURES.add(runtime_signature)
+        LOGGER.info(
+            "[CML][model] active configured_model=%s resolved_model=%s checkpoint=%s checkpoint_model=%s",
+            bundle.configured_model_name or "<default>",
+            bundle.resolved_model_name or "<legacy>",
+            Path(bundle.checkpoint_path).name,
+            bundle.checkpoint_model_name or "<missing>",
+        )
 
     inputs = _prepare_inference_inputs(df=df, bundle=bundle, ml_cfg=ml_cfg)
     if inputs is None:

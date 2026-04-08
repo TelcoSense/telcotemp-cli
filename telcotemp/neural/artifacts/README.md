@@ -13,7 +13,7 @@ the desired model from `[ml]` in `configs/config.ini`, for example:
 ```ini
 [ml]
 artifact_dir = telcotemp/neural/artifacts
-model_name = lstm_v6_final2
+model_name = lstm_v6
 ```
 
 No architecture-specific fields such as `hidden_size`, `num_layers`, `dropout`,
@@ -24,11 +24,7 @@ checkpoint metadata.
 Example `artifact.yaml`:
 
 ```yaml
-default_model: lstm_v6_final2
-
-window:
-  seq_len: 72
-  sample_minutes: 10
+default_model: lstm_v6
 
 technologies:
   - 1s10
@@ -40,8 +36,11 @@ paths:
   scaler_bundle: scaler_bundle.json
 
 models:
-  lstm_v6_final1:
-    checkpoint: lstm_v6_final1.pt
+  lstm_gelu:
+    checkpoint: lstm_gelu.pt
+    window:
+      seq_len: 36
+      sample_minutes: 10
     type: lstm
     hidden_size: 64
     num_layers: 2
@@ -52,8 +51,11 @@ models:
     use_layer_norm: false
     bidirectional: false
     temporal_readout: last
-  lstm_v6_final2:
-    checkpoint: lstm_v6_final2.pt
+  lstm_v6:
+    checkpoint: lstm_v6.pt
+    window:
+      seq_len: 72
+      sample_minutes: 10
     type: lstm
     hidden_size: 96
     num_layers: 4
