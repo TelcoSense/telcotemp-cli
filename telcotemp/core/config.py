@@ -45,6 +45,10 @@ class AppConfig:
         return {
             "enable_bias_report": dc.getboolean("enable_bias_report", True),
             "bias_report_dir": dc.get("bias_report_dir", "outputs_diagnostics"),
+            "spatial_match_enabled": dc.getboolean("spatial_match_enabled", True),
+            "spatial_match_radius_m": dc.getfloat(
+                "spatial_match_radius_m", fallback=10000.0
+            ),
         }
 
     def get_paths(self):

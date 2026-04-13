@@ -694,13 +694,16 @@ class CombinedCalculationEngine:
                         start_time=hour_start,
                         end_time=hour_end,
                         out_dir=out_dir,
+                        spatial_match_enabled=diag_conf["spatial_match_enabled"],
+                        spatial_match_radius_m=diag_conf["spatial_match_radius_m"],
                     )
                     self.logger.info(
-                        "[COMBINED] Diagnostics summary for %s -> %s: samples=%d, MAE=%.3f C",
+                        "[COMBINED] Diagnostics summary for %s -> %s: samples=%d, MAE=%.3f C, mean_bias=%.3f C",
                         hour_start.strftime("%Y-%m-%d %H:%M"),
                         hour_end.strftime("%Y-%m-%d %H:%M"),
                         report.sample_count,
                         report.mae,
+                        report.mean_bias,
                     )
 
             self.logger.debug(

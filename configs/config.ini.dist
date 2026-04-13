@@ -18,6 +18,10 @@ fmt = %(asctime)s -%(funcName)s - %(levelname)s - %(message)s
 [diagnostics]
 enable_bias_report = false
 bias_report_dir = outputs_diagnostics
+; Compare each meteo station only to nearby CML endpoints and median those nearby CMLs
+spatial_match_enabled = true
+; Maximum station-to-CML distance used for diagnostics comparison
+spatial_match_radius_m = 10000
 
 ; FILE PATHS CONFIGURATION
 [paths]
